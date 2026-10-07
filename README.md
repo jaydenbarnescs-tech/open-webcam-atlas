@@ -59,6 +59,22 @@ open "https://<your-deployment>/api/go?lat=47.37&lon=8.54"     # nearest feed in
 node scripts/dev.mjs          # http://localhost:3000 (serves public/ and api/)
 ```
 
+Single cameras show previews at every map zoom. `public/preview.js` shares the drawer/map
+player: muted live HLS, then looping MP4 clips, then automatically refreshed snapshots
+(the drawer also supports operator embeds). Clips reload at the operator's update interval.
+Map video playback is limited to the nearest 4 HLS and 8 MP4 feeds; other cameras retain
+refreshing pictures, and feeds with no snapshot can still play. Offscreen players are disposed.
+
+Browser regression checks (requires Python Playwright with WebKit and `ffmpeg`, plus the
+local server above):
+
+```bash
+python3 scripts/test-preview.py http://localhost:3000
+```
+
+The checks use generated media and fixture cameras to verify fallback, playback cleanup,
+singleton thumbnails, cluster expansion, filters, and mobile playback without operator feeds.
+
 ## Refresh the camera index
 
 ```bash

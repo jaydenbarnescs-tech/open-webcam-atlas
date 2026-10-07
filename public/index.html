@@ -153,7 +153,7 @@ header{position:fixed;top:0;left:0;right:0;height:calc(var(--top) + env(safe-are
 .preview{aspect-ratio:16/10;border-radius:8px;background:#0d0d0d;overflow:hidden;position:relative;display:grid;place-items:center}
 .preview img{width:100%;height:100%;object-fit:contain}
 .player{position:absolute;inset:0;display:grid;place-items:center}
-.player video,.player iframe{width:100%;height:100%;border:0;background:#000;object-fit:contain}
+.player img,.player video,.player iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:#000;object-fit:contain}
 .pnote{margin-top:7px;font:10.5px var(--mono);letter-spacing:.06em;color:var(--muted);min-height:15px}
 .preview .ph{position:absolute;inset:0;background-image:radial-gradient(#3a3a3a 1px,transparent 1.2px);background-size:7px 7px;display:grid;place-items:center;text-align:center;padding:24px}
 .preview .ph p{font:11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#bdbdbd;background:#0d0d0d;padding:6px 10px;border-radius:4px;margin:0}
@@ -220,12 +220,15 @@ pre.out.show{display:block}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 
-/* live thumbnails that replace the square icon when zoomed in */
+/* Single-camera previews at every zoom; larger as the map gets closer. */
 :root{--cs:56px}
 .lc{width:var(--cs);height:calc(var(--cs)*.75);box-sizing:border-box;background:#fff;border:2px solid var(--ink);outline:3px solid #fff;border-radius:3px;overflow:hidden;cursor:pointer;position:relative;box-shadow:0 2px 10px rgba(0,0,0,.18);transition:transform .12s}
-.lc:hover{transform:scale(1.06);z-index:5}
+.lc:hover,.lc:focus-visible{z-index:5;outline-color:var(--red)}
 .lc.sel{border-color:var(--red)}
+.lc-media{position:absolute;inset:0}
 .lc img,.lc video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;background:#f1f1ef}
+.lc [hidden]{display:none}
+.lc-status{position:absolute;bottom:0;left:0;right:0;background:#0009;color:white;font:8px var(--mono);padding:2px;text-align:center;white-space:nowrap;overflow:hidden;pointer-events:none}
 .lc i{position:absolute;left:4px;top:4px;width:6px;height:6px;border-radius:50%;background:var(--red);box-shadow:0 0 0 2px #fff}
 </style>
 </head>
@@ -324,6 +327,7 @@ pre.out.show{display:block}
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
+<script src="/preview.js"></script>
 <script>
 (() => {
 'use strict';
@@ -455,6 +459,10 @@ function addLayers() {
       'text-allow-overlap': false },
     paint: { 'text-color': '#555', 'text-halo-color': '#ffffff', 'text-halo-width': 3 } });
 
+  // Dedicated hit/query layers stay intact when preview markers hide the point icons.
+  map.addLayer({ id: 'cluster-targets', type: 'circle', source: 'cams', filter: ['has', 'point_count'], paint: { 'circle-radius': ['step', ['get', 'point_count'], 17, 150, 24, 1500, 32], 'circle-opacity': 0 } });
+  map.addLayer({ id: 'camera-targets', type: 'circle', source: 'cams', filter: ['!', ['has', 'point_count']], paint: { 'circle-radius': 5, 'circle-opacity': 0 } });
+
   map.addLayer({ id: 'points', type: 'symbol', source: 'cams', filter: ['!', ['has', 'point_count']],
     layout: { 'icon-image': ['match', ['get', 'm'], 2, 'cam-video', 1, 'cam-img', 'cam-link'], 'symbol-sort-key': ['-', 2, ['get', 'm']], 'icon-size': ['interpolate', ['linear'], ['zoom'], 4, 0.62, 12, 0.8, 16, 1],
       'icon-allow-overlap': true, 'icon-ignore-placement': true },
@@ -468,7 +476,12 @@ function addLayers() {
   map.addLayer({ id: 'origin', type: 'circle', source: 'search', filter: ['==', ['geometry-type'], 'Point'], paint: { 'circle-radius': 5, 'circle-color': '#c8323a', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2.5 } });
 }
 
-function refreshSource() { const s = map.getSource('cams'); if (s) s.setData(filteredFeatures()); }
+let sourceRevision = 0, clusterRequest = 0;
+function refreshSource() { sourceRevision++; const s = map.getSource('cams'); if (s) s.setData(filteredFeatures()); }
+function viewPadding() {
+  const mobile = window.innerWidth < 820;
+  return { top: 0, left: !mobile && state.origin ? 340 : 0, right: !mobile && state.selected ? 440 : 0, bottom: mobile ? window.innerHeight * (state.selected ? 0.72 : state.origin ? 0.48 : 0) : 0 };
+}
 
 /* ---------- interactions ---------- */
 let spinning = true;
@@ -485,14 +498,28 @@ map.on('load', async () => {
   updateZoom();
   if (!readHash()) setTimeout(spin, 600);
 
-  map.on('click', 'clusters', async (e) => {
-    stopSpin();
-    const f = e.features[0];
-    const z = await map.getSource('cams').getClusterExpansionZoom(f.properties.cluster_id);
-    map.easeTo({ center: f.geometry.coordinates, zoom: Math.min(z + 0.3, 16), duration: 700 });
+  map.on('click', async (e) => {
+    const clusters = map.queryRenderedFeatures(e.point, { layers: ['cluster-targets'] });
+    if (clusters.length) {
+      stopSpin(); map.stop();
+      const source = map.getSource('cams'), revision = sourceRevision, request = ++clusterRequest;
+      // Overlapping hit areas: expand the cluster nearest to the actual click.
+      const f = clusters.sort((a, b) => map.project(a.geometry.coordinates).dist(e.point) - map.project(b.geometry.coordinates).dist(e.point))[0];
+      try {
+        const expansion = await source.getClusterExpansionZoom(Number(f.properties.cluster_id));
+        if (request !== clusterRequest || revision !== sourceRevision) return;
+        const center = [...f.geometry.coordinates];
+        center[0] += 360 * Math.round((map.getCenter().lng - center[0]) / 360);
+        // Globe source tiles can be at a different zoom from the camera. Always move in.
+        const zoom = Math.min(map.getMaxZoom(), Math.max(map.getZoom() + 2, expansion + 1.5));
+        map.easeTo({ center, zoom, padding: viewPadding(), duration: 800 });
+      } catch { /* A filter can replace the cluster index while a click is pending. */ }
+      return;
+    }
+    const points = map.queryRenderedFeatures(e.point, { layers: ['points'] });
+    if (points.length) { stopSpin(); openCamera(points[0].properties.id, { fly: false }); }
   });
-  map.on('click', 'points', (e) => { stopSpin(); openCamera(e.features[0].properties.id, { fly: false }); });
-  for (const l of ['clusters', 'points']) {
+  for (const l of ['cluster-targets', 'points']) {
     map.on('mouseenter', l, () => (map.getCanvas().style.cursor = 'pointer'));
     map.on('mouseleave', l, () => (map.getCanvas().style.cursor = ''));
   }
@@ -651,131 +678,89 @@ function locate() {
 }
 
 /* ---------- camera drawer ---------- */
-let refreshTimer, hls, hlsLib;
-/* ---------- live thumbnails: at z>=15 single cameras become mini-players that grow with zoom ---------- */
-const LC = { min: 15, cap: 40, maxHls: 3, maxClip: 8, markers: new Map(), details: new Map(), hls: new Map(), dead: new Set() };
-const lcSize = (z) => Math.round(56 * Math.pow(220 / 56, Math.min(Math.max((z - 15) / 3, 0), 1)));
+let disposePlayer;
+/* Use rendered singletons, not a geographic scan: clustered cameras stay clustered. */
+const LC = { maxHls: 4, maxClip: 8, markers: new Map(), details: new Map() };
+const lcSize = (z) => Math.round(z < 12 ? 42 : 56 * Math.pow(220 / 56, Math.min(Math.max((z - 12) / 6, 0), 1)));
 async function lcDetail(id) {
-  if (!LC.details.has(id)) LC.details.set(id, fetch(`/api/cameras?id=${encodeURIComponent(id)}`).then((x) => (x.ok ? x.json() : null)).catch(() => null));
+  if (!LC.details.has(id)) LC.details.set(id, fetch(`/api/cameras?id=${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(12000) }).then((x) => (x.ok ? x.json() : null)).catch(() => null).then((d) => { if (!d) LC.details.delete(id); return d; }));
   return LC.details.get(id);
 }
-function lcDrop(id) { const m = LC.markers.get(id); if (!m) return; LC.hls.get(id)?.destroy(); LC.hls.delete(id); m.marker.remove(); LC.markers.delete(id); }
-function lcFail(id) { LC.dead.add(id); lcDrop(id); lcHideIcons(); }
+function lcDrop(id) { const m = LC.markers.get(id); if (!m) return; m.dispose?.(); m.marker.remove(); LC.markers.delete(id); }
 function lcHideIcons() {
-  const ids = [...LC.markers.keys()];
+  const ids = [...LC.markers].filter(([, m]) => !m.unavailable).map(([id]) => id);
+  const key = ids.join('|'); if (key === LC.hidden) return; LC.hidden = key;
   map.setFilter('points', ids.length ? ['all', ['!', ['has', 'point_count']], ['!', ['in', ['get', 'id'], ['literal', ids]]]] : ['!', ['has', 'point_count']]);
 }
-async function lcUpgrade(id, rank) {
-  const m = LC.markers.get(id); if (!m || m.upgraded) return; m.upgraded = true;
-  const r = state.byId.get(id); const kind = r[8];
-  const wantHls = kind === 1 && rank < LC.maxHls, wantClip = kind === 2 && rank < LC.maxClip;
-  if (!wantHls && !wantClip) return;
-  const d = await lcDetail(id); if (!LC.markers.has(id) || !d) return;
-  const v = document.createElement('video'); v.muted = true; v.loop = true; v.autoplay = true; v.playsInline = true; v.setAttribute('muted', ''); if (r[6]) v.poster = r[6];
-  const ok = () => { if (!LC.markers.has(id)) return; m.el.querySelector('img')?.remove(); m.el.prepend(v); m.live = true; };
-  v.addEventListener('playing', ok, { once: true });
-  if (wantClip && d.video_url) { v.src = d.video_url; v.play().catch(() => {}); }
-  else if (wantHls && d.stream_url) {
-    if (v.canPlayType('application/vnd.apple.mpegurl')) { v.src = d.stream_url; v.play().catch(() => {}); }
-    else try { const H = await loadHls(); if (!H.isSupported() || !LC.markers.has(id)) return; const h = new H({ maxBufferLength: 6, lowLatencyMode: true }); LC.hls.set(id, h); h.loadSource(d.stream_url); h.attachMedia(v); h.on(H.Events.ERROR, (_, e) => { if (e.fatal) { h.destroy(); LC.hls.delete(id); } }); v.play().catch(() => {}); } catch {}
-  }
+function lcMount(id, detail, motion) {
+  const m = LC.markers.get(id), r = state.byId.get(id); if (!m) return;
+  m.dispose?.(); m.unavailable = false; m.el.hidden = false;
+  m.dispose = AtlasPreview(m.media, detail || {}, {
+    image: r[6], motion,
+    onStatus: (label, moving) => { m.label.textContent = ({ 'Live video': 'LIVE', 'Latest clip': 'CLIP', 'Refreshing image': 'IMAGE' })[label] || '…'; m.el.dataset.moving = String(moving); },
+    onAvailable: () => { if (m.unavailable) { m.unavailable = false; m.el.hidden = false; lcHideIcons(); } },
+    onUnavailable: () => { m.unavailable = true; m.el.hidden = true; lcHideIcons(); },
+  });
 }
 function lcUpdate() {
-  if (!state.rows.length || !map.getLayer('points')) return;
-  if (map.getZoom() < LC.min) { for (const id of [...LC.markers.keys()]) lcDrop(id); lcHideIcons(); return; }
-  const b = map.getBounds(), c = map.getCenter(), want = [];
-  for (const r of state.rows) {
-    if (r[2] < b.getSouth() || r[2] > b.getNorth() || r[1] < b.getWest() || r[1] > b.getEast()) continue;
-    if (!state.catOn.has(r[4]) || !state.srcOn.has(r[5]) || r[7] < state.media || LC.dead.has(r[0])) continue;
-    want.push([dist(c.lat, c.lng, r[2], r[1]), r]);
+  if (!state.rows.length || !map.getLayer('camera-targets') || !map.isSourceLoaded('cams')) return;
+  document.documentElement.style.setProperty('--cs', lcSize(map.getZoom()) + 'px');
+  const c = map.getCenter(), seen = new Set(), want = [];
+  for (const f of map.queryRenderedFeatures({ layers: ['camera-targets'] })) {
+    const r = state.byId.get(f.properties.id);
+    if (!r || seen.has(r[0]) || (!r[6] && r[8] !== 1 && r[8] !== 2)) continue;
+    if (!state.catOn.has(r[4]) || !state.srcOn.has(r[5]) || r[7] < state.media) continue;
+    seen.add(r[0]); want.push([dist(c.lat, c.lng, r[2], r[1]), r]);
   }
-  want.sort((x, y) => x[0] - y[0]); want.length = Math.min(want.length, LC.cap);
-  const keep = new Set(want.map((w) => w[1][0]));
-  for (const id of [...LC.markers.keys()]) if (!keep.has(id)) lcDrop(id);
-  want.forEach(([, r], rank) => {
+  want.sort((a, b) => a[0] - b[0]);
+  for (const id of [...LC.markers.keys()]) if (!seen.has(id)) lcDrop(id);
+  let hlsCount = 0, clipCount = 0;
+  for (const [, r] of want) {
     const id = r[0];
     if (!LC.markers.has(id)) {
-      const el = document.createElement('div'); el.className = 'lc' + (state.selected === id ? ' sel' : ''); el.title = r[3];
-      if (r[6]) { const im = document.createElement('img'); im.alt = ''; im.loading = 'lazy'; im.src = r[6]; im.onerror = () => { if (!LC.markers.get(id)?.live) lcFail(id); }; el.appendChild(im); }
-      else if (r[8] === 1 || r[8] === 2) el.innerHTML = '<i></i>';
-      else return;
+      const el = document.createElement('button'); el.type = 'button'; el.className = 'lc' + (state.selected === id ? ' sel' : ''); el.title = r[3]; el.setAttribute('aria-label', `Open camera: ${r[3]}`); el.dataset.id = id;
+      const media = document.createElement('span'); media.className = 'lc-media';
+      const label = document.createElement('span'); label.className = 'lc-status';
+      el.append(media, label);
       el.onclick = (e) => { e.stopPropagation(); stopSpin(); openCamera(id, { fly: false }); };
-      LC.markers.set(id, { el, marker: new maplibregl.Marker({ element: el }).setLngLat([r[1], r[2]]).addTo(map) });
+      const marker = new maplibregl.Marker({ element: el }).setLngLat([r[1], r[2]]).addTo(map);
+      LC.markers.set(id, { el, media, label, marker, motion: false });
+      lcMount(id, null, false);
     }
-    lcUpgrade(id, rank);
-  });
+    const m = LC.markers.get(id);
+    // Bound simultaneous video decoders; all other visible cameras keep refreshing pictures.
+    const motion = r[8] === 1 ? hlsCount++ < LC.maxHls || !r[6] : r[8] === 2 ? clipCount++ < LC.maxClip || !r[6] : false;
+    if (m.motion === motion) continue;
+    m.motion = motion;
+    if (motion) lcDetail(id).then((d) => { if (LC.markers.get(id) === m && m.motion) lcMount(id, d, true); });
+    else lcMount(id, null, false);
+  }
   lcHideIcons();
 }
 let lcTimer = null;
 const lcSoon = () => { clearTimeout(lcTimer); lcTimer = setTimeout(lcUpdate, 120); };
 map.on('moveend', lcSoon);
+map.on('sourcedata', (e) => { if (e.sourceId === 'cams' && e.isSourceLoaded) lcSoon(); });
 map.on('zoom', () => document.documentElement.style.setProperty('--cs', lcSize(map.getZoom()) + 'px'));
-// still images re-fetch every 20 s (cache-busted); markers playing video are left alone
-setInterval(() => { for (const [id, m] of LC.markers) { if (m.live) continue; const im = m.el.querySelector('img'), r = state.byId.get(id); if (im && r?.[6]) { const n = new Image(); n.onload = () => { if (LC.markers.get(id) === m) im.src = n.src; }; n.src = bust(r[6]); } } }, 20000);
 
 function markSel(id) { for (const [k, m] of LC.markers) m.el.classList.toggle('sel', k === id); const r = state.byId.get(id); map.getSource('sel')?.setData(r ? { type: 'Feature', geometry: { type: 'Point', coordinates: [r[1], r[2]] }, properties: {} } : { type: 'FeatureCollection', features: [] }); }
-function bust(u) { return u + (u.includes('?') ? '&' : '?') + '_t=' + Math.floor(Date.now() / 5000); }
-function loadHls() { if (hlsLib) return hlsLib; hlsLib = new Promise((ok, no) => { const sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/npm/hls.js@1.7.3/dist/hls.min.js'; sc.onload = () => ok(window.Hls); sc.onerror = no; document.head.appendChild(sc); }); return hlsLib; }
-function stopPlayer() { clearInterval(refreshTimer); refreshTimer = null; if (hls) { hls.destroy(); hls = null; } }
-const ago = (t) => { const s = Math.round((Date.now() - t) / 1000); return s < 60 ? `${s}s ago` : `${Math.round(s / 60)} min ago`; };
-const every = (s) => !s ? '' : s < 90 ? `every ${s}s` : `every ${Math.round(s / 60)} min`;
-
-/* Player: HLS stream > MP4 clip > embedded live player > auto-refreshing still > link. Falls back down the chain on error. */
-async function mountPlayer(id, d, fallbackImg) {
+function stopPlayer() { disposePlayer?.(); disposePlayer = null; }
+function mountPlayer(id, detail, fallbackImg) {
   const box = $('#dPlayer'), badge = $('#dBadge'), note = $('#dNote');
-  if (!box) return;
-  const alive = () => state.selected === id && $('#dPlayer') === box;
-  const setBadge = (txt, live) => { badge.innerHTML = `${live ? '<i></i>' : ''}${txt}`; badge.style.display = ''; };
-  const img = d?.image_url || fallbackImg;
-
-  const still = () => {
-    stopPlayer();
-    if (!img) { box.innerHTML = `<div class="ph"><p>This camera only opens on its operator’s page</p></div>`; badge.style.display = 'none'; note.textContent = ''; return; }
-    box.innerHTML = `<img id="dImg" alt="Latest picture from this camera" src="${esc(img)}">`;
-    const el = $('#dImg'); let last = Date.now(), lastSrc = '';
-    el.onerror = () => { box.innerHTML = `<div class="ph"><p>The camera isn’t sending a picture right now</p></div>`; badge.style.display = 'none'; stopPlayer(); };
-    setBadge('Live image', true);
-    const period = Math.min(Math.max(Math.round((d?.refresh_s || 60) / 3), 4), 30);
-    const tick = () => { if (!alive()) return stopPlayer(); note.textContent = `New picture ${every(d?.refresh_s) || 'regularly'} · checked ${ago(last)}`; };
-    tick();
-    refreshTimer = setInterval(() => {
-      if (!alive()) return stopPlayer();
-      const n = new Image(); n.onload = () => { if (!alive()) return; if (n.src !== lastSrc) { el.src = n.src; lastSrc = n.src; } last = Date.now(); tick(); };
-      n.src = bust(img); tick();
-    }, period * 1000);
-  };
-
-  const video = (src, isHls) => new Promise(async (ok, fail) => {
-    stopPlayer();
-    box.innerHTML = `<video id="dVid" muted autoplay playsinline loop ${img ? `poster="${esc(img)}"` : ''} controls></video>`;
-    const v = $('#dVid'); let done = false;
-    const good = () => { if (done) return; done = true; ok(); };
-    const bad = () => { if (done) return; done = true; fail(); };
-    v.addEventListener('playing', good, { once: true });
-    v.addEventListener('error', bad, { once: true });
-    setTimeout(() => (v.readyState >= 2 ? good() : bad()), 9000);
-    if (isHls && !v.canPlayType('application/vnd.apple.mpegurl')) {
-      try {
-        const H = await loadHls(); if (!H.isSupported()) return bad();
-        hls = new H({ lowLatencyMode: true, maxBufferLength: 10 }); hls.loadSource(src); hls.attachMedia(v);
-        hls.on(H.Events.ERROR, (_, e) => { if (e.fatal) bad(); });
-      } catch { return bad(); }
-    } else v.src = src;
-    v.play().catch(() => {});
+  if (!box || state.selected !== id) return;
+  stopPlayer();
+  disposePlayer = AtlasPreview(box, detail || {}, {
+    image: fallbackImg, controls: true, embed: true,
+    onStatus: (label, moving) => {
+      badge.textContent = label; badge.style.display = '';
+      if (moving || label === 'Refreshing image' || label === 'Operator player') $('#dMedia').textContent = label;
+      note.textContent = moving ? (label === 'Latest clip' ? 'Latest operator clip · loops and refreshes automatically' : 'Streaming live from the operator') : label === 'Refreshing image' ? 'Latest operator snapshot · refreshes automatically' : label === 'Operator player' ? 'The operator’s own camera player' : '';
+    },
+    onUnavailable: () => {
+      box.innerHTML = '<div class="ph"><p>This preview is unavailable. Open the operator’s site below.</p></div>';
+      badge.style.display = 'none';
+    },
   });
-
-  try {
-    if (d?.stream_url) { setBadge('Connecting…'); await video(d.stream_url, true); if (!alive()) return; setBadge('Live video', true); note.textContent = 'Streaming live from the operator'; return; }
-  } catch {}
-  try {
-    if (d?.video_url) { setBadge('Loading clip…'); await video(d.video_url, false); if (!alive()) return; setBadge('Latest clip', true); note.textContent = `Short clip, replaced ${every(d.refresh_s) || 'regularly'} by the operator`; return; }
-  } catch {}
-  if (d?.embed_url) {
-    stopPlayer();
-    box.innerHTML = `<iframe src="${esc(d.embed_url)}" title="Live camera" allow="autoplay; encrypted-media; fullscreen; picture-in-picture" allowfullscreen referrerpolicy="no-referrer-when-downgrade" loading="lazy"></iframe>`;
-    setBadge('Live player', true); note.textContent = 'The operator’s own player, embedded'; return;
-  }
-  still();
 }
 
 async function openCamera(id, { fly }) {
@@ -805,17 +790,17 @@ async function openCamera(id, { fly }) {
     <p class="lic">${src === 'OpenStreetMap' ? 'Location from OpenStreetMap contributors (ODbL).' : `Published as open data by ${esc(src)}.`} The feed belongs to its operator; the atlas only shows and links to it.</p>`;
   $('#drawer').classList.add('open'); $('#drawer').setAttribute('aria-hidden', 'false'); document.body.classList.add('drawer-open');
   $('#dCopy').onclick = async () => { const u = `${location.origin}/api/go/${encodeURIComponent(id)}`; try { await navigator.clipboard.writeText(u); $('#dCopy').textContent = 'Copied'; } catch { prompt('Redirect link', u); } setTimeout(() => $('#dCopy') && ($('#dCopy').textContent = 'Copy redirect link'), 1600); };
-  setFig('Fig. 03 · Camera', r[7] === 2 ? 'Watch it live.' : 'Open any of them.', `${r[3].slice(0, 48)} · ${src}`);
+  setFig('Fig. 03 · Camera', r[8] === 2 ? 'Watch the latest clip.' : r[7] === 2 ? 'Watch it live.' : 'Open any of them.', `${r[3].slice(0, 48)} · ${src}`);
   if (fly) map.flyTo({ center: [r[1], r[2]], zoom: Math.max(map.getZoom(), 15.5), duration: 900, padding: window.innerWidth >= 820 ? { right: 440, left: state.origin ? 340 : 0 } : { bottom: window.innerHeight * 0.6 } });
   writeHash();
-  let det = null;
-  try { const x = await fetch(`/api/cameras?id=${encodeURIComponent(id)}`); if (x.ok) det = await x.json(); } catch {}
-  if (state.selected !== id) return;
+  const playerBox = $('#dPlayer');
+  const det = await lcDetail(id);
+  if (state.selected !== id || $('#dPlayer') !== playerBox) return;
   if (det?.feed_url) { try { $('#dHost').textContent = ' · ' + new URL(det.feed_url).hostname.replace(/^www\./, ''); } catch {} }
   mountPlayer(id, det, r[6] || null);
 }
 function closeCamera() {
-  stopPlayer(); state.selected = null; markSel(null);
+  stopPlayer(); state.selected = null; markSel(null); map.setPadding(viewPadding());
   $('#drawer').classList.remove('open'); $('#drawer').setAttribute('aria-hidden', 'true'); document.body.classList.remove('drawer-open');
   document.querySelectorAll('.ritem.active').forEach((el) => el.classList.remove('active'));
   if (state.origin) runSearch(false, true); else defaultFig();

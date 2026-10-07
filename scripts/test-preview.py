@@ -40,7 +40,7 @@ async def main():
             assert await page.locator('video').evaluate('(v) => v.isConnected && v.muted && v.loop && !v.paused')
             assert await page.evaluate("statuses.includes('Latest clip')")
             await page.locator('video').evaluate("v => v.dispatchEvent(new Event('error'))")
-            await page.wait_for_function("statuses.at(-1) === 'Refreshing image'")
+            await page.wait_for_function("statuses.at(-1) === 'Snapshot'")
             assert await page.locator('video').count() == 0
             src = await page.locator('img').get_attribute('src')
             await page.wait_for_function('(src) => document.querySelector("img").getAttribute("src") !== src', arg=src, timeout=8000)
@@ -53,6 +53,27 @@ async def main():
             await page.wait_for_timeout(200)
             assert await page.evaluate('oldVideo.paused && !oldVideo.hasAttribute("src")')
             print('PASS: stream → clip → refreshing image; disposal stops playback', flush=True)
+
+            # Same image bytes are not a new frame; a changed frame is, and failures retain it.
+            second = base64.b64decode(await page.evaluate("""() => { const c=document.createElement('canvas');c.width=c.height=2;const g=c.getContext('2d');g.fillStyle='red';g.fillRect(0,0,2,2);return c.toDataURL().split(',')[1]; }"""))
+            frame = {'body': PIXEL, 'fail': False}
+            async def snapshot(route):
+                await route.fulfill(status=502 if frame['fail'] else 200, body=frame['body'], content_type='image/png')
+            await page.route('**/__test/snapshot', snapshot)
+            await page.evaluate("""() => {
+              window.snapshots=[];
+              window.dispose=AtlasPreview(document.querySelector('#preview'), {image_url:'/__test/image.png',snapshot_url:'/__test/snapshot',refresh_s:5}, {trackSnapshot:true,onSnapshot:s=>snapshots.push(s.state)});
+            }""")
+            await page.wait_for_function("snapshots.includes('loaded')")
+            await page.wait_for_function("snapshots.includes('unchanged')", timeout=8000)
+            frame['body'] = second
+            await page.wait_for_function("snapshots.includes('updated')", timeout=8000)
+            last_src = await page.locator('img').get_attribute('src')
+            frame['fail'] = True
+            await page.wait_for_function("snapshots.includes('unavailable')", timeout=8000)
+            assert await page.locator('img').get_attribute('src') == last_src
+            await page.evaluate('dispose()')
+            print('PASS: unchanged/new/failed snapshot checks report accurately and keep the last frame', flush=True)
 
             rows = [[f'fixture-{i}', lon, lat, f'Camera {i}', 0, 0, '/__test/image.png', 2, 2]
                     for i, (lon, lat) in enumerate([(139.70, 35.68), (139.704, 35.682), (139.708, 35.684), (142, 35)])]

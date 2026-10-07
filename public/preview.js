@@ -11,7 +11,7 @@
   });
 
   window.AtlasPreview = function(host, detail = {}, options = {}) {
-    let disposed = false, generation = 0, release = () => {}, imageTimer, pendingImage;
+    let disposed = false, generation = 0, release = () => {}, imageTimer, pendingImage, snapshotRequest, objectUrl, frameHash;
     const imageUrl = detail.image_url || options.image;
     const status = (label, moving = false) => { if (!disposed) options.onStatus?.(label, moving); };
     const image = document.createElement('img');
@@ -25,18 +25,42 @@
       next.onerror = () => { pendingImage = null; };
       next.src = fresh(imageUrl);
     };
+    const checkSnapshot = async () => {
+      if (disposed || document.hidden || snapshotRequest) return;
+      snapshotRequest = new AbortController();
+      const timeout = setTimeout(() => snapshotRequest?.abort(), 12000);
+      try {
+        const response = await fetch(detail.snapshot_url, { cache: 'no-store', signal: snapshotRequest.signal });
+        if (!response.ok) throw new Error('Snapshot unavailable');
+        const blob = await response.blob();
+        const hash = response.headers.get('X-Camera-Frame') || Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer())), b => b.toString(16).padStart(2, '0')).join('');
+        if (disposed) return;
+        const changed = frameHash !== hash, first = !frameHash;
+        if (changed) {
+          const previous = objectUrl;
+          objectUrl = URL.createObjectURL(blob); image.src = objectUrl; image.hidden = false; frameHash = hash;
+          if (previous) URL.revokeObjectURL(previous);
+        }
+        options.onSnapshot?.({ state: first ? 'loaded' : changed ? 'updated' : 'unchanged', checkedAt: Date.now(), updatedAt: response.headers.get('X-Camera-Updated') });
+      } catch {
+        if (!disposed) options.onSnapshot?.({ state: 'unavailable', checkedAt: Date.now() });
+      } finally { clearTimeout(timeout); snapshotRequest = null; }
+    };
     const snapshot = () => {
-      status(imageUrl ? 'Refreshing image' : 'Open camera');
+      status(imageUrl ? 'Snapshot' : 'Open camera');
       if (!imageUrl || (image.complete && !image.naturalWidth)) options.onUnavailable?.();
       if (!imageUrl) return;
       image.onload = () => {
         if (disposed) return;
         if (!image.isConnected) host.replaceChildren(image);
-        status('Refreshing image'); options.onAvailable?.();
+        if (!options.trackSnapshot || !detail.snapshot_url) status('Snapshot');
+        options.onAvailable?.();
       };
       image.onerror = () => options.onUnavailable?.();
       // Recheck the operator's image without blinking or clearing the last good frame.
-      imageTimer = setInterval(refreshImage, Math.min(30, Math.max(5, detail.refresh_s || 20)) * 1000);
+      const refresh = options.trackSnapshot && detail.snapshot_url ? checkSnapshot : refreshImage;
+      if (refresh === checkSnapshot) refresh();
+      imageTimer = setInterval(refresh, Math.min(30, Math.max(5, detail.refresh_s || 20)) * 1000);
     };
     const sources = options.motion === false ? [] : [
       detail.stream_url && ['hls', detail.stream_url],
@@ -57,10 +81,11 @@
         frame.title = 'Operator’s camera player'; frame.allow = 'autoplay; encrypted-media; fullscreen; picture-in-picture';
         frame.allowFullscreen = true; frame.src = url;
         const timeout = setTimeout(() => { if (current()) advance(); }, 12000);
-        frame.onload = () => { clearTimeout(timeout); if (current()) { image.hidden = true; status('Operator player'); } };
+        frame.onload = () => { clearTimeout(timeout); if (current()) { image.hidden = true; status(detail.playback_kind === 'timelapse' ? 'Timelapse · past day' : 'Operator player'); } };
         frame.onerror = () => { if (current()) advance(); };
         host.append(frame);
-        release = () => { clearTimeout(timeout); frame.onload = frame.onerror = null; frame.remove(); };
+        const refresh = detail.playback_kind === 'timelapse' ? setInterval(() => { if (current() && !document.hidden) frame.src = fresh(url); }, Math.max(60, detail.refresh_s || 600) * 1000) : null;
+        release = () => { clearTimeout(timeout); clearInterval(refresh); frame.onload = frame.onerror = null; frame.remove(); };
         return;
       }
       const video = document.createElement('video');
@@ -111,6 +136,8 @@
     advance();
     return () => {
       disposed = true; generation++; release(); clearInterval(imageTimer);
+      snapshotRequest?.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
       image.onload = image.onerror = null;
       if (pendingImage) pendingImage.onload = pendingImage.onerror = null;
       host.replaceChildren();

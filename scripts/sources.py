@@ -7,7 +7,7 @@ Camera dict: id, lat, lon, name, cat (traffic|scenic|water|weather|other), src (
 country (ISO-2), url (operator page or image), img (still), stream (HLS m3u8), video (mp4 clip),
 embed (iframe url), refresh (seconds between new stills, if known).
 """
-import json, os, re, hashlib, html, time
+import json, os, re, hashlib, html, time, math
 import urllib.request, urllib.error
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse, quote
@@ -382,7 +382,82 @@ def windy():
                 out.append(cam(f"windy-{w_['webcamId']}", loc['latitude'], loc['longitude'],
                                ' › '.join(filter(None, [loc.get('city'), w_.get('title', '').split('›')[-1].strip()])) or w_.get('title'), cat,
                                'Windy Webcams', (loc.get('country_code') or '').upper(), (w_.get('urls') or {}).get('detail') or f"https://www.windy.com/webcams/{w_['webcamId']}",
-                               img=im.get('preview') or im.get('thumbnail'), embed=pl.get('live'), refresh=600))
+                               img=im.get('preview') or im.get('thumbnail'), embed=pl.get('live') or pl.get('day'), refresh=600))
+                if not pl.get('live') and pl.get('day'):
+                    out[-1]['embed'] += '?autoplay=1&loop=1'
+                    out[-1]['timelapse'] = True
+    return out
+
+
+def osaka():
+    """Public prefectural river cameras: join the official catalogue with its EPSG:3857 map."""
+    base = 'https://www.osaka-kasen-portal.net/suibou/'
+    catalogue = json.loads(cached('osaka-cameras.json', base + 'publicdata/ja/camera_listJp.json'))
+    layers = json.loads(cached('osaka-map.json', base + 'publicdata/gis_Pc_jp.json'))
+    positions = {}
+    for layer in layers['layersDefinitionList']:
+        for collection in layer.get('value') or []:
+            if not isinstance(collection, dict): continue
+            for feature in collection.get('features', []):
+                p = feature.get('properties', {})
+                if p.get('clickedBalloonMethod') == 'kasenCamera':
+                    x, y = feature['geometry']['coordinates']
+                    positions[p['iconID']] = (math.degrees(2 * math.atan(math.exp(y / 6378137)) - math.pi / 2), math.degrees(x / 6378137))
+    out = []
+    for c in catalogue:
+        id = c['cameraId']
+        if id not in positions or not c.get('cameraURL'): continue
+        lat, lon = positions[id]
+        out.append(cam('osaka-river-' + id, lat, lon, c['hyojiNm'] + ' · ' + c.get('jusho', ''), 'water',
+                       'Osaka Prefecture Rivers', 'JP', base + 'public/ja/cameratabonly.html?cameraId=' + id,
+                       img=c['cameraURL'], refresh=300))
+    return out
+
+
+def kyoto_roads():
+    """Only stations with published images; resolve timestamped filenames at request time."""
+    import xml.etree.ElementTree as ET
+    base = 'https://kyoto-douro-s3bk-prod-02.s3.ap-northeast-1.amazonaws.com/public_html/common/'
+    stations = ET.fromstring(cached('kyoto-road-stations.xml', base + 'xml/SENSOR_CAMERA.xml'))
+    images = ET.fromstring(get(base + 'xml/CAMERA_IMAGE.xml'))
+    available = {c.findtext('CameraNo') for c in images if c.findtext('FileName')}
+    out = []
+    for c in stations:
+        number = c.findtext('CameraNo')
+        if number not in available or c.findtext('SensorClass') != '003': continue
+        id = 'kyoto-road-' + number
+        out.append(cam(id, c.findtext('Latitude'), c.findtext('Longitude'),
+                       c.findtext('SensorName') + ' · ' + c.findtext('CityName'), 'traffic', 'Kyoto Prefecture Roads', 'JP',
+                       'https://dobokubousai.pref.kyoto.jp/pc/camera_syousai.html?cameraNo=' + number,
+                       img='/api/snapshot?id=' + id, refresh=900))
+    return out
+
+
+def kyoto_tourism():
+    """Official public live streams, matched to documented landmark locations (not guessed camera poles)."""
+    locations = json.load(open(os.path.join(os.path.dirname(__file__), 'kyoto-locations.json')))
+    out = []
+    def videos(value):
+        if isinstance(value, dict):
+            v = value.get('lockupViewModel')
+            if v and 'THUMBNAIL_OVERLAY_BADGE_STYLE_LIVE' in json.dumps(v):
+                yield v.get('contentId'), v.get('metadata', {}).get('lockupMetadataViewModel', {}).get('title', {}).get('content', '')
+            for child in value.values(): yield from videos(child)
+        elif isinstance(value, list):
+            for child in value: yield from videos(child)
+    for channel in ['DMOKYOTO_Live', 'kyototouristspotlive']:
+        body = get('https://www.youtube.com/@' + channel + '/streams')
+        match = re.search(r'(?:var\s+)?ytInitialData\s*=\s*', body)
+        if not match: raise ValueError('YouTube channel data format changed')
+        data, _ = json.JSONDecoder().raw_decode(body[match.end():])
+        for video, title in videos(data):
+            location = next((p for p in locations if p['match'] in title), None)
+            if not location or not re.fullmatch(r'[\w-]{11}', video or ''): continue
+            c = cam('kyoto-tourism-' + location['key'], location['lat'], location['lon'], location['name'], 'scenic',
+                    'Kyoto Official Tourism', 'JP', 'https://www.youtube.com/watch?v=' + video,
+                    img='https://i.ytimg.com/vi/' + video + '/hqdefault.jpg', embed=youtube_embed('https://youtu.be/' + video))
+            c['location_note'] = 'Landmark location (OpenStreetMap); the precise camera mount is not published.'
+            out.append(c)
     return out
 
 
@@ -391,4 +466,4 @@ def _safe(fn, *a):
     except Exception as ex: print(f'  ! {getattr(fn, "__name__", fn)}{a}: {ex}'); return []
 
 
-ALL = [osm, krk, usgs_hivis, nyc, caltrans, p511, wsdot, tripcheck, iowa, drivebc, tfl, digitraffic, iceland, fotowebcam, hongkong, singapore, nz, nsw, qld, windy]
+ALL = [osm, krk, usgs_hivis, nyc, caltrans, p511, wsdot, tripcheck, iowa, drivebc, tfl, digitraffic, iceland, fotowebcam, hongkong, singapore, nz, nsw, qld, windy, osaka, kyoto_roads, kyoto_tourism]

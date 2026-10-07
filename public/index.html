@@ -226,7 +226,8 @@ pre.out.show{display:block}
 .lc:hover,.lc:focus-visible{z-index:5;outline-color:var(--red)}
 .lc.sel{border-color:var(--red)}
 .lc-media{position:absolute;inset:0}
-.lc img,.lc video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;background:#f1f1ef}
+.lc img,.lc video,.lc iframe{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;background:#f1f1ef;border:0}
+.lc iframe{pointer-events:none;width:400px;height:300px;transform:scale(var(--embed-scale));transform-origin:top left}
 .lc [hidden]{display:none}
 .lc-status{position:absolute;bottom:0;left:0;right:0;background:#0009;color:white;font:8px var(--mono);padding:2px;text-align:center;white-space:nowrap;overflow:hidden;pointer-events:none}
 .lc i{position:absolute;left:4px;top:4px;width:6px;height:6px;border-radius:50%;background:var(--red);box-shadow:0 0 0 2px #fff}
@@ -297,7 +298,7 @@ pre.out.show{display:block}
 </div>
 
 <div id="hint" class="mono">Scroll to pan · pinch to zoom · press a camera to open it</div>
-<div id="legend" class="mono"><span><i class="v"></i>Live video</span><span><i></i>Live image</span><span><i class="o"></i>Link only</span><span><i class="r"></i>Search point</span></div>
+<div id="legend" class="mono"><span><i class="v"></i>Video / timelapse</span><span><i></i>Snapshot</span><span><i class="o"></i>Link only</span><span><i class="r"></i>Search point</span></div>
 
 <aside id="drawer" aria-label="Camera details" aria-hidden="true">
   <div class="dhead"><div class="mono" id="dCrumb">Camera</div>
@@ -333,7 +334,7 @@ pre.out.show{display:block}
 'use strict';
 const $ = (s) => document.querySelector(s);
 const CAT_LABEL = { traffic: 'Traffic', scenic: 'Scenic', water: 'Rivers & water', weather: 'Weather & roads', other: 'Other' };
-const MEDIA_LABEL = ['Link only', 'Live image', 'Live video'];
+const MEDIA_LABEL = ['Link only', 'Snapshot', 'Video / timelapse'];
 const slug = (s) => String(s).toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '');
 const RADII = [0.5, 1, 2, 5, 10, 25, 50];
 const HOME = { center: [139.7, 30], zoom: window.innerWidth < 820 ? 1.0 : 2.0 };
@@ -432,7 +433,7 @@ function filteredFeatures() {
 }
 
 async function loadData() {
-  const res = await fetch('/data/cams.json'); const d = await res.json();
+  const res = await fetch('/data/cams.json', { cache: 'no-cache' }); const d = await res.json();
   state.rows = d.rows; state.cats = d.cats; state.srcs = d.srcs;
   for (const r of d.rows) if (typeof r[6] === 'string' && r[6].startsWith('w:')) r[6] = `https://imgproxy.windy.com/_/preview/plain/current/${r[6].slice(2)}/original.jpg?v=2`;
   for (const r of d.rows) state.byId.set(r[0], r);
@@ -536,7 +537,7 @@ $('#home').onclick = () => { stopSpin(); clearSearch(); closeCamera(); map.flyTo
 
 /* ---------- fig card ---------- */
 function setFig(no, title, cap = '') { $('#figNo').textContent = no; $('#figTitle').textContent = title; $('#figCap').textContent = cap; }
-function defaultFig() { const v = state.rows.reduce((n, r) => n + (r[7] === 2), 0); setFig('Fig. 01 · Earth', `${fmtN(state.rows.length || 38104)} cameras. One globe.`, state.rows.length ? `${fmtN(v)} play live video` : ''); }
+function defaultFig() { const v = state.rows.reduce((n, r) => n + (r[7] === 2), 0); setFig('Fig. 01 · Earth', `${fmtN(state.rows.length || 38104)} cameras. One globe.`, state.rows.length ? `${fmtN(v)} have video or timelapse` : ''); }
 
 /* ---------- filters (絞り込み) ---------- */
 function buildFilters() {
@@ -680,8 +681,14 @@ function locate() {
 /* ---------- camera drawer ---------- */
 let disposePlayer;
 /* Use rendered singletons, not a geographic scan: clustered cameras stay clustered. */
-const LC = { maxHls: 4, maxClip: 8, markers: new Map(), details: new Map() };
+const LC = { maxHls: 4, maxClip: 8, maxEmbed: 2, markers: new Map(), details: new Map() };
 const lcSize = (z) => Math.round(z < 12 ? 42 : 56 * Math.pow(220 / 56, Math.min(Math.max((z - 12) / 6, 0), 1)));
+function lcResize() {
+  const size = lcSize(map.getZoom());
+  document.documentElement.style.setProperty('--cs', size + 'px');
+  // Give operator players their required viewport, then scale into the map thumbnail.
+  document.documentElement.style.setProperty('--embed-scale', (size - 4) / 400);
+}
 async function lcDetail(id) {
   if (!LC.details.has(id)) LC.details.set(id, fetch(`/api/cameras?id=${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(12000) }).then((x) => (x.ok ? x.json() : null)).catch(() => null).then((d) => { if (!d) LC.details.delete(id); return d; }));
   return LC.details.get(id);
@@ -696,25 +703,25 @@ function lcMount(id, detail, motion) {
   const m = LC.markers.get(id), r = state.byId.get(id); if (!m) return;
   m.dispose?.(); m.unavailable = false; m.el.hidden = false;
   m.dispose = AtlasPreview(m.media, detail || {}, {
-    image: r[6], motion,
-    onStatus: (label, moving) => { m.label.textContent = ({ 'Live video': 'LIVE', 'Latest clip': 'CLIP', 'Refreshing image': 'IMAGE' })[label] || '…'; m.el.dataset.moving = String(moving); },
+    image: r[6], motion, embed: motion,
+    onStatus: (label, moving) => { m.label.textContent = ({ 'Live video': 'LIVE', 'Latest clip': 'CLIP', 'Snapshot': 'IMAGE', 'Timelapse · past day': 'TIMELAPSE', 'Operator player': 'PLAYER' })[label] || '…'; m.el.dataset.moving = String(moving); },
     onAvailable: () => { if (m.unavailable) { m.unavailable = false; m.el.hidden = false; lcHideIcons(); } },
     onUnavailable: () => { m.unavailable = true; m.el.hidden = true; lcHideIcons(); },
   });
 }
 function lcUpdate() {
   if (!state.rows.length || !map.getLayer('camera-targets') || !map.isSourceLoaded('cams')) return;
-  document.documentElement.style.setProperty('--cs', lcSize(map.getZoom()) + 'px');
+  lcResize();
   const c = map.getCenter(), seen = new Set(), want = [];
   for (const f of map.queryRenderedFeatures({ layers: ['camera-targets'] })) {
     const r = state.byId.get(f.properties.id);
-    if (!r || seen.has(r[0]) || (!r[6] && r[8] !== 1 && r[8] !== 2)) continue;
+    if (!r || seen.has(r[0]) || (!r[6] && !r[8])) continue;
     if (!state.catOn.has(r[4]) || !state.srcOn.has(r[5]) || r[7] < state.media) continue;
     seen.add(r[0]); want.push([dist(c.lat, c.lng, r[2], r[1]), r]);
   }
   want.sort((a, b) => a[0] - b[0]);
   for (const id of [...LC.markers.keys()]) if (!seen.has(id)) lcDrop(id);
-  let hlsCount = 0, clipCount = 0;
+  let hlsCount = 0, clipCount = 0, embedCount = 0;
   for (const [, r] of want) {
     const id = r[0];
     if (!LC.markers.has(id)) {
@@ -729,7 +736,7 @@ function lcUpdate() {
     }
     const m = LC.markers.get(id);
     // Bound simultaneous video decoders; all other visible cameras keep refreshing pictures.
-    const motion = r[8] === 1 ? hlsCount++ < LC.maxHls || !r[6] : r[8] === 2 ? clipCount++ < LC.maxClip || !r[6] : false;
+    const motion = r[8] === 1 ? hlsCount++ < LC.maxHls || !r[6] : r[8] === 2 ? clipCount++ < LC.maxClip || !r[6] : r[8] === 3 ? embedCount++ < LC.maxEmbed || !r[6] : false;
     if (m.motion === motion) continue;
     m.motion = motion;
     if (motion) lcDetail(id).then((d) => { if (LC.markers.get(id) === m && m.motion) lcMount(id, d, true); });
@@ -741,7 +748,7 @@ let lcTimer = null;
 const lcSoon = () => { clearTimeout(lcTimer); lcTimer = setTimeout(lcUpdate, 120); };
 map.on('moveend', lcSoon);
 map.on('sourcedata', (e) => { if (e.sourceId === 'cams' && e.isSourceLoaded) lcSoon(); });
-map.on('zoom', () => document.documentElement.style.setProperty('--cs', lcSize(map.getZoom()) + 'px'));
+map.on('zoom', lcResize);
 
 function markSel(id) { for (const [k, m] of LC.markers) m.el.classList.toggle('sel', k === id); const r = state.byId.get(id); map.getSource('sel')?.setData(r ? { type: 'Feature', geometry: { type: 'Point', coordinates: [r[1], r[2]] }, properties: {} } : { type: 'FeatureCollection', features: [] }); }
 function stopPlayer() { disposePlayer?.(); disposePlayer = null; }
@@ -750,11 +757,18 @@ function mountPlayer(id, detail, fallbackImg) {
   if (!box || state.selected !== id) return;
   stopPlayer();
   disposePlayer = AtlasPreview(box, detail || {}, {
-    image: fallbackImg, controls: true, embed: true,
+    image: fallbackImg, controls: true, embed: true, trackSnapshot: true,
     onStatus: (label, moving) => {
       badge.textContent = label; badge.style.display = '';
-      if (moving || label === 'Refreshing image' || label === 'Operator player') $('#dMedia').textContent = label;
-      note.textContent = moving ? (label === 'Latest clip' ? 'Latest operator clip · loops and refreshes automatically' : 'Streaming live from the operator') : label === 'Refreshing image' ? 'Latest operator snapshot · refreshes automatically' : label === 'Operator player' ? 'The operator’s own camera player' : '';
+      if (moving || ['Snapshot', 'Operator player', 'Timelapse · past day'].includes(label)) $('#dMedia').textContent = label;
+      note.textContent = moving ? (label === 'Latest clip' ? 'Latest operator clip · loops and refreshes automatically' : 'Streaming live from the operator') : label === 'Snapshot' ? 'Operator snapshot · checking for a newer frame' : label === 'Timelapse · past day' ? 'Recorded views from the past day · autoplaying timelapse, not live video' : label === 'Operator player' ? 'The operator’s own camera player' : '';
+    },
+    onSnapshot: ({ state, checkedAt, updatedAt }) => {
+      badge.style.display = '';
+      const checked = new Date(checkedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const stamp = updatedAt && Number.isFinite(Date.parse(updatedAt)) ? ` · source image ${new Date(updatedAt).toLocaleString()}` : '';
+      badge.textContent = state === 'updated' ? 'New snapshot' : state === 'unavailable' ? 'Update unavailable' : 'Snapshot';
+      note.textContent = (state === 'unchanged' ? 'No newer frame from the operator' : state === 'updated' ? 'New frame received' : state === 'unavailable' ? 'Could not check the operator; keeping the last picture' : 'Snapshot received') + ` · checked ${checked}` + stamp;
     },
     onUnavailable: () => {
       box.innerHTML = '<div class="ph"><p>This preview is unavailable. Open the operator’s site below.</p></div>';
@@ -790,13 +804,14 @@ async function openCamera(id, { fly }) {
     <p class="lic">${src === 'OpenStreetMap' ? 'Location from OpenStreetMap contributors (ODbL).' : `Published as open data by ${esc(src)}.`} The feed belongs to its operator; the atlas only shows and links to it.</p>`;
   $('#drawer').classList.add('open'); $('#drawer').setAttribute('aria-hidden', 'false'); document.body.classList.add('drawer-open');
   $('#dCopy').onclick = async () => { const u = `${location.origin}/api/go/${encodeURIComponent(id)}`; try { await navigator.clipboard.writeText(u); $('#dCopy').textContent = 'Copied'; } catch { prompt('Redirect link', u); } setTimeout(() => $('#dCopy') && ($('#dCopy').textContent = 'Copy redirect link'), 1600); };
-  setFig('Fig. 03 · Camera', r[8] === 2 ? 'Watch the latest clip.' : r[7] === 2 ? 'Watch it live.' : 'Open any of them.', `${r[3].slice(0, 48)} · ${src}`);
+  setFig('Fig. 03 · Camera', src === 'Windy Webcams' ? 'Watch the day unfold.' : r[8] === 2 ? 'Watch the latest clip.' : r[7] === 2 ? 'Watch it live.' : 'Open any of them.', `${r[3].slice(0, 48)} · ${src}`);
   if (fly) map.flyTo({ center: [r[1], r[2]], zoom: Math.max(map.getZoom(), 15.5), duration: 900, padding: window.innerWidth >= 820 ? { right: 440, left: state.origin ? 340 : 0 } : { bottom: window.innerHeight * 0.6 } });
   writeHash();
   const playerBox = $('#dPlayer');
   const det = await lcDetail(id);
   if (state.selected !== id || $('#dPlayer') !== playerBox) return;
   if (det?.feed_url) { try { $('#dHost').textContent = ' · ' + new URL(det.feed_url).hostname.replace(/^www\./, ''); } catch {} }
+  if (det?.location_note) { const note = document.createElement('p'); note.className = 'pnote'; note.textContent = det.location_note; $('#dBody .facts').after(note); }
   mountPlayer(id, det, r[6] || null);
 }
 function closeCamera() {

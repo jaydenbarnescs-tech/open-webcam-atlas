@@ -1,0 +1,186 @@
+[
+  {
+    "key": "ABJKHT5ZrF4",
+    "match": "京都駅前バス",
+    "name": "Kyoto Station Bus Terminal, Kyoto",
+    "lat": 34.9870823,
+    "lon": 135.7585053,
+    "location_source": "OpenStreetMap via Photon; approximate landmark location"
+  },
+  {
+    "key": "372yduHx8dQ",
+    "match": "京都駅八条口",
+    "name": "Kyoto Station Hachijo Taxi Station, Kyoto",
+    "lat": 34.9838185,
+    "lon": 135.7576974,
+    "location_source": "OpenStreetMap via Photon; approximate landmark location"
+  },
+  {
+    "key": "evMpyQnPwxQ",
+    "match": "裏参道",
+    "name": "Fushimi Inari Shrine, Kyoto",
+    "lat": 34.9672445,
+    "lon": 135.7729905,
+    "location_source": "OpenStreetMap via Photon; approximate landmark location"
+  },
+  {
+    "key": "vR7q44PEhrM",
+    "match": "哲学の道",
+    "name": "The Philosopher’s Path, Kyoto",
+    "lat": 35.0270743,
+    "lon": 135.7952039,
+    "location_source": "OpenStreetMap via Photon; approximate landmark location"
+  },
+  {
+    "key": "01nT87VRcQk",
+    "match": "北野天満宮",
+    "name": "Kitano Tenmangu Shrine, Kyoto",
+    "lat": 35.0304752,
+    "lon": 135.7349176,
+    "location_source": "OpenStreetMap via Photon; approximate landmark location"
+  },
+  {
+    "key": "J3xHBUgWRqc",
+    "match": "花見小路",
+    "name": "Hanamikoji Street, Kyoto",
+    "lat": 35.0026541,
+    "lon": 135.7748676,
+    "location_source": "OpenStreetMap via Photon; approximate landmark location"
+  },
+  {
+    "key": "qZ2ghbe3zc0",
+    "match": "錦市場",
+    "name": "Nishiki Market, Kyoto (Streaming: 11:00-18:00 JST)",
+    "lat": 35.0050244,
+    "lon": 135.7655699,
+    "location_source": "OpenStreetMap via Photon; approximate landmark location"
+  },
+  {
+    "key": "niQh-vFZBs4",
+    "match": "ねねの道",
+    "name": "Nene no michi(Nene Street), Kyoto",
+    "lat": 35.0005286,
+    "lon": 135.77995,
+    "location_source": "OpenStreetMap via Photon; approximate landmark location"
+  },
+  {
+    "key": "5hlP34DHcFk",
+    "match": "城南宮",
+    "name": "Jonangu Shrine, Kyoto",
+    "lat": 34.9505959,
+    "lon": 135.7469948,
+    "location_source": "OpenStreetMap via Photon; approximate landmark location"
+  },
+  {
+    "key": "rjQZjpEjnc4",
+    "match": "神護寺",
+    "name": "Jingoji Temple, Kyoto",
+    "lat": 35.054476,
+    "lon": 135.6699923,
+    "location_source": "OpenStreetMap via Photon; approximate landmark location"
+  },
+  {
+    "key": "mEqMdNLcpGY",
+    "match": "大原野神社",
+    "name": "Oharano-jinja Shrine, Kyoto",
+    "lat": 34.9592799,
+    "lon": 135.6561896,
+    "location_source": "OpenStreetMap via Photon; approximate landmark location"
+  },
+  {
+    "key": "QKqHuf0O3yw",
+    "match": "寂光院",
+    "name": "Jakkoin Temple, Kyoto",
+    "lat": 35.1240599,
+    "lon": 135.8208194,
+    "location_source": "OpenStreetMap via Photon; approximate landmark location"
+  },
+  {
+    "key": "5Ica9fIP_Ng",
+    "match": "随心院",
+    "name": "Zuishinin Temple, Kyoto",
+    "lat": 34.9597014,
+    "lon": 135.8149949,
+    "location_source": "OpenStreetMap via Photon; approximate landmark location"
+  },
+  {
+    "key": "Z37hOWHiGKw",
+    "match": "醍醐寺",
+    "name": "Daigoji Temple, Kyoto",
+    "lat": 34.9507217,
+    "lon": 135.8185588,
+    "location_source": "OpenStreetMap via Photon; approximate landmark location"
+  },
+  {
+    "key": "P0jNz4sEbsg",
+    "match": "ウッディー京北",
+    "name": "Michi-no-Eki Woody Keihoku, Kyoto",
+    "lat": 35.1559862,
+    "lon": 135.633319,
+    "location_source": "OpenStreetMap via Photon; approximate landmark location"
+  },
+  {
+    "key": "eJAqPCdS1cY",
+    "match": "貴船神社",
+    "name": "Kifune-jinja Shrine, Kyoto",
+    "lat": 35.1218892,
+    "lon": 135.7629362,
+    "location_source": "OpenStreetMap via Photon; approximate landmark location"
+  },
+  {
+    "key": "bK9vpKisRnQ",
+    "match": "永観堂",
+    "name": "Eikando (Zenrin-ji Temple), Kyoto",
+    "lat": 35.0139886,
+    "lon": 135.7949993,
+    "location_source": "OpenStreetMap via Photon; approximate landmark location"
+  },
+  {
+    "key": "kFxyBm56WPk",
+    "match": "銀閣寺",
+    "name": "Ginkaku-ji Temple, Kyoto",
+    "lat": 35.0268996,
+    "lon": 135.7983714,
+    "location_source": "OpenStreetMap via Photon; approximate landmark location"
+  },
+  {
+    "key": "MMeBDRfRHyA",
+    "match": "表参道",
+    "name": "Fushimi Inari Taisha, Kyoto",
+    "lat": 34.9672445,
+    "lon": 135.7729905,
+    "location_source": "OpenStreetMap via Photon; approximate landmark location"
+  },
+  {
+    "key": "iUbbYRWIEzo",
+    "match": "平安神宮",
+    "name": "Heian Jingu Shrine, Kyoto",
+    "lat": 35.0160683,
+    "lon": 135.7828961,
+    "location_source": "OpenStreetMap via Photon; approximate landmark location"
+  },
+  {
+    "key": "cUnYPpK7ENk",
+    "match": "清水坂",
+    "name": "Kiyomizu-zaka, Kyoto",
+    "lat": 34.995737,
+    "lon": 135.7818041,
+    "location_source": "OpenStreetMap via Photon; approximate landmark location"
+  },
+  {
+    "key": "AhFQvPJe_Yk",
+    "match": "五条坂",
+    "name": "HigashiojiDori Gojo-zaka",
+    "lat": 34.9953647,
+    "lon": 135.7783671,
+    "location_source": "OpenStreetMap via Photon; approximate landmark location"
+  },
+  {
+    "key": "bamboo-forest",
+    "match": "竹林の小径",
+    "name": "Arashiyama Bamboo Grove, Kyoto",
+    "lat": 35.0172501,
+    "lon": 135.6720664,
+    "location_source": "https://ja.kyoto.travel/tourism/single01.php?category_id=8&tourism_id=2683 (official embedded map)"
+  }
+]

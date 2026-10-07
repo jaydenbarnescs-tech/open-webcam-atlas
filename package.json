@@ -1,10 +1,15 @@
 {
   "name": "open-webcam-atlas",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "An open index of public webcams on a monochrome globe, plus a tiny nearest-camera API.",
-  "scripts": { "data": "bash scripts/fetch-raw.sh && python3 scripts/build-data.py" },
-  "engines": { "node": ">=20" },
+  "scripts": {
+    "data": "python3 scripts/build-data.py",
+    "dev": "node scripts/dev.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
   "license": "MIT"
 }

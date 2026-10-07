@@ -80,6 +80,9 @@ header{position:fixed;top:0;left:0;right:0;height:calc(var(--top) + env(safe-are
 #legend span{display:flex;align-items:center;gap:6px}
 #legend i{display:inline-block;width:9px;height:9px;background:#fff;box-shadow:inset 0 0 0 1.5px var(--ink),inset 0 0 0 3px #fff,inset 0 0 0 9px var(--ink)}
 #legend i.o{box-shadow:inset 0 0 0 1.5px var(--ink)}
+#legend i.v{box-shadow:none;background:var(--ink);clip-path:none;position:relative}
+#legend i.v::after{content:"";position:absolute;left:3px;top:2px;border-left:4px solid #fff;border-top:2.5px solid transparent;border-bottom:2.5px solid transparent}
+.chips.scroll{max-height:128px;overflow:auto;padding-right:2px}
 #legend i.r{background:var(--red);border-radius:50%}
 
 /* ---------- toolbar ---------- */
@@ -149,6 +152,9 @@ header{position:fixed;top:0;left:0;right:0;height:calc(var(--top) + env(safe-are
 .dbody{overflow:auto;padding:0 18px 24px;flex:1}
 .preview{aspect-ratio:16/10;border-radius:8px;background:#0d0d0d;overflow:hidden;position:relative;display:grid;place-items:center}
 .preview img{width:100%;height:100%;object-fit:contain}
+.player{position:absolute;inset:0;display:grid;place-items:center}
+.player video,.player iframe{width:100%;height:100%;border:0;background:#000;object-fit:contain}
+.pnote{margin-top:7px;font:10.5px var(--mono);letter-spacing:.06em;color:var(--muted);min-height:15px}
 .preview .ph{position:absolute;inset:0;background-image:radial-gradient(#3a3a3a 1px,transparent 1.2px);background-size:7px 7px;display:grid;place-items:center;text-align:center;padding:24px}
 .preview .ph p{font:11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#bdbdbd;background:#0d0d0d;padding:6px 10px;border-radius:4px;margin:0}
 .live{position:absolute;left:10px;bottom:10px;font:9.5px var(--mono);letter-spacing:.14em;color:#fff;background:#00000080;padding:3px 7px;border-radius:4px;display:flex;align-items:center;gap:6px}
@@ -237,7 +243,7 @@ pre.out.show{display:block}
 <div id="title" class="card">
   <div class="mono">Webcam atlas · Earth</div>
   <h1>Eyes on <i>earth.</i></h1>
-  <div class="mono" id="titleCount">— cameras · 3 open sources</div>
+  <div class="mono" id="titleCount">— cameras</div>
 </div>
 
 <section id="results" class="card" aria-label="Cameras near the searched place">
@@ -255,9 +261,10 @@ pre.out.show{display:block}
   <div class="fgroup"><div class="mono"><span>Radius</span><span id="radiusLbl">2 km</span></div>
     <div class="seg" id="radiusSeg"></div></div>
   <div class="fgroup"><div class="mono"><span>Category</span></div><div class="chips" id="catChips"></div></div>
-  <div class="fgroup"><div class="mono"><span>Source</span></div><div class="chips" id="srcChips"></div></div>
+  <div class="fgroup"><div class="mono"><span>Show</span></div><div class="seg" id="mediaSeg" style="grid-template-columns:repeat(3,1fr)"><button data-m="0">All</button><button data-m="1">Has a picture</button><button data-m="2">Plays video</button></div></div>
+  <div class="fgroup"><div class="mono"><span>Source</span><span id="srcN"></span></div><div class="chips scroll" id="srcChips"></div></div>
   <div class="fgroup">
-    <button class="toggle" id="imgOnly" aria-pressed="false" style="width:100%"><span>Only cameras with a live image</span><span class="sw"></span></button>
+
     <button class="toggle" id="streets" aria-pressed="false" style="width:100%"><span>Show streets</span><span class="sw"></span></button>
   </div>
 </div>
@@ -279,7 +286,7 @@ pre.out.show{display:block}
 </div>
 
 <div id="hint" class="mono">Scroll to pan · pinch to zoom · press a camera to open it</div>
-<div id="legend" class="mono"><span><i></i>Live image</span><span><i class="o"></i>Link only</span><span><i class="r"></i>Search point</span></div>
+<div id="legend" class="mono"><span><i class="v"></i>Live video</span><span><i></i>Live image</span><span><i class="o"></i>Link only</span><span><i class="r"></i>Search point</span></div>
 
 <aside id="drawer" aria-label="Camera details" aria-hidden="true">
   <div class="dhead"><div class="mono" id="dCrumb">Camera</div>
@@ -295,16 +302,16 @@ pre.out.show{display:block}
     </div>
     <p>Free, no key, CORS open. Send a GPS point, get the closest public cameras back, or get redirected straight to the nearest feed.</p>
     <div class="ep"><div class="row"><span class="verb">GET</span><span>/api/nearest?lat=&amp;lon=</span></div>
-      <p>The 10 closest cameras, nearest first, with distance and direction. Optional: <code>limit</code> (1–200), <code>radius_km</code>, <code>category</code> (traffic, scenic, water, other), <code>source</code> (osm, nyc, caltrans), <code>has_image=1</code>.</p>
+      <p>The 10 closest cameras, nearest first, with distance and direction. Optional: <code>limit</code> (1–200), <code>radius_km</code>, <code>category</code> (traffic, scenic, water, weather, other), <code>source</code> (any part of a source name, e.g. <code>tfl</code>, <code>caltrans</code>), <code>media</code> (<code>image</code> or <code>video</code>).</p>
       <div class="try"><input id="tLat" value="40.758" aria-label="Latitude"><input id="tLon" value="-73.9855" aria-label="Longitude"><button id="tRun">Run</button></div>
       <pre class="out" id="tOut"></pre></div>
     <div class="ep"><div class="row"><span class="verb">GET</span><span>/api/go?lat=&amp;lon=</span></div>
-      <p>Redirects (302) to the closest camera's feed. Add <code>&amp;image=1</code> to land on the still image when there is one. Accepts the same filters as <code>/nearest</code>.</p></div>
+      <p>Redirects (302) to the closest camera's feed. Add <code>&amp;video=1</code> to land on the live stream or clip, or <code>&amp;image=1</code> for the still image. Accepts the same filters as <code>/nearest</code>.</p></div>
     <div class="ep"><div class="row"><span class="verb">GET</span><span>/api/go/{id}</span></div>
       <p>Redirects to one camera by id. Every result from <code>/nearest</code> includes its <code>go</code> link.</p></div>
     <div class="ep"><div class="row"><span class="verb">GET</span><span>/api/cameras?id=</span></div>
-      <p>One camera's full record, including its feed and stream URLs. Without an id, returns dataset totals.</p></div>
-    <p class="lic">Camera index © OpenStreetMap contributors (ODbL), NYC DOT and Caltrans open data. Feeds belong to their operators. Please don't hammer them.</p>
+      <p>One camera's full record: feed, still image, HLS stream, MP4 clip or embeddable player URLs. Without an id, returns dataset totals.</p></div>
+    <p class="lic">Camera index © OpenStreetMap contributors (ODbL) plus 29 government open-data feeds across 21 countries. Feeds belong to their operators. Please don't hammer them.</p>
   </div>
 </div>
 
@@ -313,13 +320,14 @@ pre.out.show{display:block}
 (() => {
 'use strict';
 const $ = (s) => document.querySelector(s);
-const CAT_LABEL = { traffic: 'Traffic', scenic: 'Scenic', water: 'Rivers & water', other: 'Other' };
-const SRC_KEY = { 'OpenStreetMap': 'osm', 'NYC DOT': 'nyc', 'Caltrans': 'caltrans' };
+const CAT_LABEL = { traffic: 'Traffic', scenic: 'Scenic', water: 'Rivers & water', weather: 'Weather & roads', other: 'Other' };
+const MEDIA_LABEL = ['Link only', 'Live image', 'Live video'];
+const slug = (s) => String(s).toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '');
 const RADII = [0.5, 1, 2, 5, 10, 25, 50];
 const HOME = { center: [139.7, 30], zoom: window.innerWidth < 820 ? 1.0 : 2.0 };
 
 const state = { rows: [], cats: [], srcs: [], byId: new Map(), origin: null, radius: 2,
-  catOn: null, srcOn: null, imgOnly: false, streets: false, selected: null, results: [] };
+  catOn: null, srcOn: null, media: 0, streets: false, selected: null, results: [] };
 
 /* ---------- geo helpers (same maths as the API) ---------- */
 const rad = (d) => d * Math.PI / 180;
@@ -358,7 +366,8 @@ function squareIcon(filled) {
   const S = 30, c = document.createElement('canvas'); c.width = c.height = S; const g = c.getContext('2d');
   g.fillStyle = '#0a0a0a'; g.fillRect(5, 5, 20, 20);
   g.fillStyle = '#ffffff'; g.fillRect(8, 8, 14, 14);
-  if (filled) { g.fillStyle = '#0a0a0a'; g.fillRect(11.5, 11.5, 7, 7); }
+  if (filled === 'video') { g.fillStyle = '#0a0a0a'; g.fillRect(8, 8, 14, 14); g.fillStyle = '#fff'; g.beginPath(); g.moveTo(12.5, 10.5); g.lineTo(19, 15); g.lineTo(12.5, 19.5); g.closePath(); g.fill(); }
+  else if (filled) { g.fillStyle = '#0a0a0a'; g.fillRect(11.5, 11.5, 7, 7); }
   // soft white halo
   g.globalCompositeOperation = 'destination-over'; g.fillStyle = 'rgba(255,255,255,.95)'; g.fillRect(3, 3, 24, 24);
   return g.getImageData(0, 0, S, S);
@@ -389,7 +398,7 @@ const style = {
 
 const map = new maplibregl.Map({ container: 'map', style, center: HOME.center, zoom: HOME.zoom, minZoom: 0.4, maxZoom: 19.5, attributionControl: { compact: true }, renderWorldCopies: false, dragRotate: false, pitchWithRotate: false });
 map.touchZoomRotate.disableRotation();
-const ICONS = { dots: dotPattern, 'cam-img': () => squareIcon(true), 'cam-link': () => squareIcon(false) };
+const ICONS = { dots: dotPattern, 'cam-video': () => squareIcon('video'), 'cam-img': () => squareIcon(true), 'cam-link': () => squareIcon(false) };
 for (let b = 0; b < HT_SIZES.length; b++) for (let v = 0; v < 3; v++) ICONS[`ht-${b}-${v}`] = () => halftone(b, v + 1);
 function addIcons() { for (const [k, f] of Object.entries(ICONS)) if (!map.hasImage(k)) map.addImage(k, f(), { pixelRatio: 2 }); }
 map.on('styleimagemissing', (e) => { if (ICONS[e.id] && !map.hasImage(e.id)) map.addImage(e.id, ICONS[e.id](), { pixelRatio: 2 }); });
@@ -399,8 +408,8 @@ map.on('style.load', addIcons);
 function filteredFeatures() {
   const f = [];
   for (const r of state.rows) {
-    if (!state.catOn.has(r[4]) || !state.srcOn.has(r[5]) || (state.imgOnly && !r[6])) continue;
-    f.push({ type: 'Feature', id: f.length, geometry: { type: 'Point', coordinates: [r[1], r[2]] }, properties: { id: r[0], img: r[6] ? 1 : 0 } });
+    if (!state.catOn.has(r[4]) || !state.srcOn.has(r[5]) || (r[7] < state.media)) continue;
+    f.push({ type: 'Feature', id: f.length, geometry: { type: 'Point', coordinates: [r[1], r[2]] }, properties: { id: r[0], m: r[7] } });
   }
   return { type: 'FeatureCollection', features: f };
 }
@@ -411,6 +420,7 @@ async function loadData() {
   for (const r of d.rows) state.byId.set(r[0], r);
   state.catOn = new Set(d.cats.map((_, i) => i)); state.srcOn = new Set(d.srcs.map((_, i) => i));
   $('#titleCount').textContent = `${fmtN(d.rows.length)} cameras · ${d.srcs.length} open sources`;
+  defaultFig();
   buildFilters();
 }
 
@@ -432,7 +442,7 @@ function addLayers() {
     paint: { 'text-color': '#555', 'text-halo-color': '#ffffff', 'text-halo-width': 3 } });
 
   map.addLayer({ id: 'points', type: 'symbol', source: 'cams', filter: ['!', ['has', 'point_count']],
-    layout: { 'icon-image': ['case', ['==', ['get', 'img'], 1], 'cam-img', 'cam-link'], 'icon-size': ['interpolate', ['linear'], ['zoom'], 4, 0.62, 12, 0.8, 16, 1],
+    layout: { 'icon-image': ['match', ['get', 'm'], 2, 'cam-video', 1, 'cam-img', 'cam-link'], 'symbol-sort-key': ['-', 2, ['get', 'm']], 'icon-size': ['interpolate', ['linear'], ['zoom'], 4, 0.62, 12, 0.8, 16, 1],
       'icon-allow-overlap': true, 'icon-ignore-placement': true },
     paint: { 'icon-opacity': 1 } });
 
@@ -484,7 +494,7 @@ $('#home').onclick = () => { stopSpin(); clearSearch(); closeCamera(); map.flyTo
 
 /* ---------- fig card ---------- */
 function setFig(no, title, cap = '') { $('#figNo').textContent = no; $('#figTitle').textContent = title; $('#figCap').textContent = cap; }
-function defaultFig() { setFig('Fig. 01 · Earth', `${fmtN(state.rows.length || 11944)} cameras. One globe.`); }
+function defaultFig() { const v = state.rows.reduce((n, r) => n + (r[7] === 2), 0); setFig('Fig. 01 · Earth', `${fmtN(state.rows.length || 38104)} cameras. One globe.`, state.rows.length ? `${fmtN(v)} play live video` : ''); }
 
 /* ---------- filters (絞り込み) ---------- */
 function buildFilters() {
@@ -504,13 +514,14 @@ function syncFilters() {
   $('#radiusLbl').textContent = `${state.radius} km`;
   document.querySelectorAll('#catChips .chip').forEach((b) => b.setAttribute('aria-pressed', state.catOn.has(+b.dataset.i)));
   document.querySelectorAll('#srcChips .chip').forEach((b) => b.setAttribute('aria-pressed', state.srcOn.has(+b.dataset.i)));
-  $('#imgOnly').setAttribute('aria-pressed', state.imgOnly);
+  document.querySelectorAll('#mediaSeg button').forEach((b) => b.setAttribute('aria-pressed', +b.dataset.m === state.media));
+  $('#srcN').textContent = `${state.srcOn.size} of ${state.srcs.length}`;
   $('#streets').setAttribute('aria-pressed', state.streets);
-  const n = (state.cats.length - state.catOn.size) + (state.srcs.length - state.srcOn.size) + (state.imgOnly ? 1 : 0) + (state.radius !== 2 ? 1 : 0);
+  const n = (state.cats.length - state.catOn.size) + (state.srcs.length - state.srcOn.size) + (state.media ? 1 : 0) + (state.radius !== 2 ? 1 : 0);
   $('#filterN').textContent = n;
 }
 function applyFilters() { syncFilters(); refreshSource(); if (state.origin) runSearch(false, true); }
-$('#imgOnly').onclick = () => { state.imgOnly = !state.imgOnly; applyFilters(); };
+$('#mediaSeg').onclick = (e) => { const b = e.target.closest('button'); if (!b) return; state.media = +b.dataset.m; applyFilters(); };
 $('#streets').onclick = () => { state.streets = !state.streets; map.setLayoutProperty('streets', 'visibility', state.streets ? 'visible' : 'none'); syncFilters(); };
 function toggleFilters(force) { const open = force ?? !$('#filters').classList.contains('open'); $('#filters').classList.toggle('open', open); $('#filtersBtn').setAttribute('aria-pressed', open); }
 $('#filtersBtn').onclick = () => toggleFilters();
@@ -562,19 +573,19 @@ function setOrigin(lat, lon, label) {
 function computeNearby(limit = 100) {
   const o = state.origin, R = state.radius * 1000, out = [];
   for (const r of state.rows) {
-    if (!state.catOn.has(r[4]) || !state.srcOn.has(r[5]) || (state.imgOnly && !r[6])) continue;
+    if (!state.catOn.has(r[4]) || !state.srcOn.has(r[5]) || (r[7] < state.media)) continue;
     if (Math.abs(r[2] - o.lat) > state.radius / 110.574 + 0.01) continue;
     const d = dist(o.lat, o.lon, r[2], r[1]); if (d <= R) out.push([d, r]);
   }
   out.sort((a, b) => a[0] - b[0]);
   return out.slice(0, limit);
 }
-function nearestAny() { const o = state.origin; let best = null; for (const r of state.rows) { if (!state.catOn.has(r[4]) || !state.srcOn.has(r[5]) || (state.imgOnly && !r[6])) continue; const d = dist(o.lat, o.lon, r[2], r[1]); if (!best || d < best[0]) best = [d, r]; } return best; }
+function nearestAny() { const o = state.origin; let best = null; for (const r of state.rows) { if (!state.catOn.has(r[4]) || !state.srcOn.has(r[5]) || (r[7] < state.media)) continue; const d = dist(o.lat, o.lon, r[2], r[1]); if (!best || d < best[0]) best = [d, r]; } return best; }
 function apiUrl() {
   const o = state.origin, p = new URLSearchParams({ lat: o.lat.toFixed(5), lon: o.lon.toFixed(5), radius_km: state.radius, limit: 100 });
   if (state.catOn.size < state.cats.length) p.set('category', [...state.catOn].map((i) => state.cats[i]).join(','));
-  if (state.srcOn.size < state.srcs.length) p.set('source', [...state.srcOn].map((i) => SRC_KEY[state.srcs[i]]).join(','));
-  if (state.imgOnly) p.set('has_image', '1');
+  if (state.srcOn.size < state.srcs.length) p.set('source', [...state.srcOn].map((i) => slug(state.srcs[i])).join(','));
+  if (state.media) p.set('media', state.media === 2 ? 'video' : 'image');
   return `/api/nearest?${p}`;
 }
 function runSearch(fly, keepView) {
@@ -596,7 +607,7 @@ function runSearch(fly, keepView) {
     $('#expand')?.addEventListener('click', () => { state.radius = pickRadius(nb[0]); syncFilters(); runSearch(true); });
   } else {
     list.innerHTML = hits.map(([d, r], i) => { const b = compass(bearing(o.lat, o.lon, r[2], r[1]));
-      return `<button class="ritem" data-id="${esc(r[0])}"><span class="idx">${String(i + 1).padStart(2, '0')}</span><span class="thumb${r[6] ? '' : ' none'}">${r[6] ? `<img loading="lazy" alt="" src="${esc(r[6])}" onerror="this.parentNode.classList.add('none');this.remove()">` : ''}</span><span><div class="nm">${esc(r[3])}</div><div class="meta">${fmtDist(d)} ${b} · ${CAT_LABEL[state.cats[r[4]]]}</div></span></button>`; }).join('');
+      return `<button class="ritem" data-id="${esc(r[0])}"><span class="idx">${String(i + 1).padStart(2, '0')}</span><span class="thumb${r[6] ? '' : ' none'}">${r[6] ? `<img loading="lazy" alt="" src="${esc(r[6])}" onerror="this.parentNode.classList.add('none');this.remove()">` : ''}</span><span><div class="nm">${esc(r[3])}</div><div class="meta">${r[7] === 2 ? '<b style="color:var(--ink);font-weight:500">▶ Video</b> · ' : ''}${fmtDist(d)} ${b} · ${CAT_LABEL[state.cats[r[4]]]}</div></span></button>`; }).join('');
   }
   setFig('Fig. 02 · Nearby', hits.length ? `${hits.length}${hits.length === 100 ? '+' : ''} camera${hits.length === 1 ? '' : 's'} within ${state.radius} km.` : `Nothing within ${state.radius} km.`, o.label);
   if (fly) {
@@ -625,49 +636,110 @@ function locate() {
 }
 
 /* ---------- camera drawer ---------- */
-let refreshTimer;
+let refreshTimer, hls, hlsLib;
 function markSel(id) { const r = state.byId.get(id); map.getSource('sel')?.setData(r ? { type: 'Feature', geometry: { type: 'Point', coordinates: [r[1], r[2]] }, properties: {} } : { type: 'FeatureCollection', features: [] }); }
-function bust(u) { return u + (u.includes('?') ? '&' : '?') + '_t=' + Math.floor(Date.now() / 10000); }
+function bust(u) { return u + (u.includes('?') ? '&' : '?') + '_t=' + Math.floor(Date.now() / 5000); }
+function loadHls() { if (hlsLib) return hlsLib; hlsLib = new Promise((ok, no) => { const sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/npm/hls.js@1.7.3/dist/hls.min.js'; sc.onload = () => ok(window.Hls); sc.onerror = no; document.head.appendChild(sc); }); return hlsLib; }
+function stopPlayer() { clearInterval(refreshTimer); refreshTimer = null; if (hls) { hls.destroy(); hls = null; } }
+const ago = (t) => { const s = Math.round((Date.now() - t) / 1000); return s < 60 ? `${s}s ago` : `${Math.round(s / 60)} min ago`; };
+const every = (s) => !s ? '' : s < 90 ? `every ${s}s` : `every ${Math.round(s / 60)} min`;
+
+/* Player: HLS stream > MP4 clip > embedded live player > auto-refreshing still > link. Falls back down the chain on error. */
+async function mountPlayer(id, d, fallbackImg) {
+  const box = $('#dPlayer'), badge = $('#dBadge'), note = $('#dNote');
+  if (!box) return;
+  const alive = () => state.selected === id && $('#dPlayer') === box;
+  const setBadge = (txt, live) => { badge.innerHTML = `${live ? '<i></i>' : ''}${txt}`; badge.style.display = ''; };
+  const img = d?.image_url || fallbackImg;
+
+  const still = () => {
+    stopPlayer();
+    if (!img) { box.innerHTML = `<div class="ph"><p>This camera only opens on its operator’s page</p></div>`; badge.style.display = 'none'; note.textContent = ''; return; }
+    box.innerHTML = `<img id="dImg" alt="Latest picture from this camera" src="${esc(img)}">`;
+    const el = $('#dImg'); let last = Date.now(), lastSrc = '';
+    el.onerror = () => { box.innerHTML = `<div class="ph"><p>The camera isn’t sending a picture right now</p></div>`; badge.style.display = 'none'; stopPlayer(); };
+    setBadge('Live image', true);
+    const period = Math.min(Math.max(Math.round((d?.refresh_s || 60) / 3), 4), 30);
+    const tick = () => { if (!alive()) return stopPlayer(); note.textContent = `New picture ${every(d?.refresh_s) || 'regularly'} · checked ${ago(last)}`; };
+    tick();
+    refreshTimer = setInterval(() => {
+      if (!alive()) return stopPlayer();
+      const n = new Image(); n.onload = () => { if (!alive()) return; if (n.src !== lastSrc) { el.src = n.src; lastSrc = n.src; } last = Date.now(); tick(); };
+      n.src = bust(img); tick();
+    }, period * 1000);
+  };
+
+  const video = (src, isHls) => new Promise(async (ok, fail) => {
+    stopPlayer();
+    box.innerHTML = `<video id="dVid" muted autoplay playsinline loop ${img ? `poster="${esc(img)}"` : ''} controls></video>`;
+    const v = $('#dVid'); let done = false;
+    const good = () => { if (done) return; done = true; ok(); };
+    const bad = () => { if (done) return; done = true; fail(); };
+    v.addEventListener('playing', good, { once: true });
+    v.addEventListener('error', bad, { once: true });
+    setTimeout(() => (v.readyState >= 2 ? good() : bad()), 9000);
+    if (isHls && !v.canPlayType('application/vnd.apple.mpegurl')) {
+      try {
+        const H = await loadHls(); if (!H.isSupported()) return bad();
+        hls = new H({ lowLatencyMode: true, maxBufferLength: 10 }); hls.loadSource(src); hls.attachMedia(v);
+        hls.on(H.Events.ERROR, (_, e) => { if (e.fatal) bad(); });
+      } catch { return bad(); }
+    } else v.src = src;
+    v.play().catch(() => {});
+  });
+
+  try {
+    if (d?.stream_url) { setBadge('Connecting…'); await video(d.stream_url, true); if (!alive()) return; setBadge('Live video', true); note.textContent = 'Streaming live from the operator'; return; }
+  } catch {}
+  try {
+    if (d?.video_url) { setBadge('Loading clip…'); await video(d.video_url, false); if (!alive()) return; setBadge('Latest clip', true); note.textContent = `Short clip, replaced ${every(d.refresh_s) || 'regularly'} by the operator`; return; }
+  } catch {}
+  if (d?.embed_url) {
+    stopPlayer();
+    box.innerHTML = `<iframe src="${esc(d.embed_url)}" title="Live camera" allow="autoplay; encrypted-media; fullscreen; picture-in-picture" allowfullscreen referrerpolicy="no-referrer-when-downgrade" loading="lazy"></iframe>`;
+    setBadge('Live player', true); note.textContent = 'The operator’s own player, embedded'; return;
+  }
+  still();
+}
+
 async function openCamera(id, { fly }) {
   const r = state.byId.get(id); if (!r) return;
+  stopPlayer();
   state.selected = id; markSel(id);
   document.querySelectorAll('.ritem').forEach((el) => el.classList.toggle('active', el.dataset.id === id));
   const cat = state.cats[r[4]], src = state.srcs[r[5]], o = state.origin;
   const d = o ? dist(o.lat, o.lon, r[2], r[1]) : null;
   $('#dCrumb').textContent = `Camera · ${src}`;
-  const img = r[6];
   $('#dBody').innerHTML = `
-    <div class="preview">${img ? `<img id="dImg" alt="Latest image from ${esc(r[3])}" src="${esc(img)}"><span class="live"><i></i>LIVE STILL</span>` : ''}
-      <div class="ph" id="dPh" style="${img ? 'display:none' : ''}"><p>${img ? 'Image unavailable right now' : 'This camera opens on its operator’s page'}</p></div></div>
+    <div class="preview"><div id="dPlayer" class="player">${r[6] ? `<img alt="" src="${esc(r[6])}" style="opacity:.55">` : '<div class="ph"><p>Loading</p></div>'}</div><span class="live" id="dBadge" style="display:none"></span></div>
+    <div class="pnote" id="dNote"></div>
     <div class="mono dfig">Fig. 03 · ${esc(CAT_LABEL[cat])}${d != null ? ` · ${fmtDist(d)} away` : ''}</div>
     <h2 class="dname">${esc(r[3])}</h2>
     <div class="dby">by ${esc(src)}<span id="dHost" style="color:var(--muted)"></span></div>
-    <a class="btn dark" href="/api/go/${encodeURIComponent(id)}" target="_blank" rel="noopener">Open live feed</a>
+    <a class="btn dark" id="dOpen" href="/api/go/${encodeURIComponent(id)}" target="_blank" rel="noopener">Open on the operator’s site</a>
     <button class="btn line" id="dCopy">Copy redirect link</button>
     <div class="facts">
+      <div><div class="mono">Plays</div><div id="dMedia">${MEDIA_LABEL[r[7]]}</div></div>
       <div><div class="mono">Category</div><div>${esc(CAT_LABEL[cat])}</div></div>
-      <div><div class="mono">Source</div><div>${esc(src)}</div></div>
       <div><div class="mono">Coordinates</div><div style="font-family:var(--mono);font-size:12px">${r[2].toFixed(5)}, ${r[1].toFixed(5)}</div></div>
       <div><div class="mono">${d != null ? 'Distance' : 'Camera id'}</div><div style="font-family:var(--mono);font-size:12px">${d != null ? `${fmtDist(d)} ${compass(bearing(o.lat, o.lon, r[2], r[1]))}` : esc(id)}</div></div>
     </div>
     <div class="mono" style="font-size:9px">Same camera, from the API</div>
-    <div class="code"><b>GET</b> /api/go/${esc(id)}<br><b>GET</b> /api/nearest?lat=${r[2]}&amp;lon=${r[1]}&amp;limit=10</div>
-    <p class="lic">${src === 'OpenStreetMap' ? 'Location from OpenStreetMap contributors (ODbL).' : `Published as open data by ${esc(src)}.`} The feed belongs to its operator; the atlas only links to it.</p>`;
+    <div class="code"><b>GET</b> /api/go/${esc(id)}<br><b>GET</b> /api/cameras?id=${esc(id)}<br><b>GET</b> /api/nearest?lat=${r[2]}&amp;lon=${r[1]}&amp;limit=10</div>
+    <p class="lic">${src === 'OpenStreetMap' ? 'Location from OpenStreetMap contributors (ODbL).' : `Published as open data by ${esc(src)}.`} The feed belongs to its operator; the atlas only shows and links to it.</p>`;
   $('#drawer').classList.add('open'); $('#drawer').setAttribute('aria-hidden', 'false'); document.body.classList.add('drawer-open');
-  const im = $('#dImg');
-  if (im) {
-    im.onerror = () => { im.remove(); $('#dPh').style.display = ''; document.querySelector('.live')?.remove(); };
-    clearInterval(refreshTimer);
-    if (src !== 'OpenStreetMap' || /current|latest|live|image/i.test(img)) refreshTimer = setInterval(() => { const n = new Image(); n.onload = () => { if (state.selected === id && $('#dImg')) $('#dImg').src = n.src; }; n.src = bust(img); }, 15000);
-  }
   $('#dCopy').onclick = async () => { const u = `${location.origin}/api/go/${encodeURIComponent(id)}`; try { await navigator.clipboard.writeText(u); $('#dCopy').textContent = 'Copied'; } catch { prompt('Redirect link', u); } setTimeout(() => $('#dCopy') && ($('#dCopy').textContent = 'Copy redirect link'), 1600); };
-  setFig('Fig. 03 · Camera', 'Open any of them.', `${r[3].slice(0, 48)} · ${src}`);
-  fetch(`/api/cameras?id=${encodeURIComponent(id)}`).then((x) => x.ok ? x.json() : null).then((j) => { if (j && state.selected === id && j.feed_url) { try { $('#dHost').textContent = ' · ' + new URL(j.feed_url).hostname.replace(/^www\./, ''); } catch {} } }).catch(() => {});
+  setFig('Fig. 03 · Camera', r[7] === 2 ? 'Watch it live.' : 'Open any of them.', `${r[3].slice(0, 48)} · ${src}`);
   if (fly) map.flyTo({ center: [r[1], r[2]], zoom: Math.max(map.getZoom(), 15.5), duration: 900, padding: window.innerWidth >= 820 ? { right: 440, left: state.origin ? 340 : 0 } : { bottom: window.innerHeight * 0.6 } });
   writeHash();
+  let det = null;
+  try { const x = await fetch(`/api/cameras?id=${encodeURIComponent(id)}`); if (x.ok) det = await x.json(); } catch {}
+  if (state.selected !== id) return;
+  if (det?.feed_url) { try { $('#dHost').textContent = ' · ' + new URL(det.feed_url).hostname.replace(/^www\./, ''); } catch {} }
+  mountPlayer(id, det, r[6] || null);
 }
 function closeCamera() {
-  clearInterval(refreshTimer); state.selected = null; markSel(null);
+  stopPlayer(); state.selected = null; markSel(null);
   $('#drawer').classList.remove('open'); $('#drawer').setAttribute('aria-hidden', 'true'); document.body.classList.remove('drawer-open');
   document.querySelectorAll('.ritem.active').forEach((el) => el.classList.remove('active'));
   if (state.origin) runSearch(false, true); else defaultFig();

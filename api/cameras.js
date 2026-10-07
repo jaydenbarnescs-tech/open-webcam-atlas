@@ -12,5 +12,7 @@ export default function handler(req, res) {
   }
   const by = (k) => all.reduce((m, c) => ((m[c[k]] = (m[c[k]] || 0) + 1), m), {});
   res.setHeader('Cache-Control', 'public, s-maxage=3600');
-  res.status(200).json({ total: all.length, categories: CATEGORIES, by_category: by('cat'), by_source: by('src'), attribution: ATTRIBUTION });
+  const media = by('mode');
+  res.status(200).json({ total: all.length, categories: CATEGORIES, by_category: by('cat'), by_source: by('src'), by_country: by('country'),
+    by_media: { video: media[2] || 0, image: media[1] || 0, link: media[0] || 0 }, attribution: ATTRIBUTION });
 }

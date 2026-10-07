@@ -681,7 +681,7 @@ function locate() {
 /* ---------- camera drawer ---------- */
 let disposePlayer;
 /* Use rendered singletons, not a geographic scan: clustered cameras stay clustered. */
-const LC = { maxHls: 4, maxClip: 8, maxEmbed: 2, markers: new Map(), details: new Map() };
+const LC = { maxHls: 4, maxClip: 8, maxEmbed: 2, maxFrames: 4, markers: new Map(), details: new Map() };
 const lcSize = (z) => Math.round(z < 12 ? 42 : 56 * Math.pow(220 / 56, Math.min(Math.max((z - 12) / 6, 0), 1)));
 function lcResize() {
   const size = lcSize(map.getZoom());
@@ -704,7 +704,7 @@ function lcMount(id, detail, motion) {
   m.dispose?.(); m.unavailable = false; m.el.hidden = false;
   m.dispose = AtlasPreview(m.media, detail || {}, {
     image: r[6], motion, embed: motion,
-    onStatus: (label, moving) => { m.label.textContent = ({ 'Live video': 'LIVE', 'Latest clip': 'CLIP', 'Snapshot': 'IMAGE', 'Timelapse · past day': 'TIMELAPSE', 'Operator player': 'PLAYER' })[label] || '…'; m.el.dataset.moving = String(moving); },
+    onStatus: (label, moving) => { m.label.textContent = ({ 'Live video': 'LIVE', 'Latest clip': 'CLIP', 'Snapshot': 'IMAGE', 'Timelapse · past day': 'TIMELAPSE', 'Timelapse · recorded frames': 'TIMELAPSE', 'Operator player': 'PLAYER' })[label] || '…'; m.el.dataset.moving = String(moving); },
     onAvailable: () => { if (m.unavailable) { m.unavailable = false; m.el.hidden = false; lcHideIcons(); } },
     onUnavailable: () => { m.unavailable = true; m.el.hidden = true; lcHideIcons(); },
   });
@@ -721,7 +721,7 @@ function lcUpdate() {
   }
   want.sort((a, b) => a[0] - b[0]);
   for (const id of [...LC.markers.keys()]) if (!seen.has(id)) lcDrop(id);
-  let hlsCount = 0, clipCount = 0, embedCount = 0;
+  let hlsCount = 0, clipCount = 0, embedCount = 0, framesCount = 0;
   for (const [, r] of want) {
     const id = r[0];
     if (!LC.markers.has(id)) {
@@ -736,7 +736,7 @@ function lcUpdate() {
     }
     const m = LC.markers.get(id);
     // Bound simultaneous video decoders; all other visible cameras keep refreshing pictures.
-    const motion = r[8] === 1 ? hlsCount++ < LC.maxHls || !r[6] : r[8] === 2 ? clipCount++ < LC.maxClip || !r[6] : r[8] === 3 ? embedCount++ < LC.maxEmbed || !r[6] : false;
+    const motion = r[8] === 1 ? hlsCount++ < LC.maxHls || !r[6] : r[8] === 2 ? clipCount++ < LC.maxClip || !r[6] : r[8] === 3 ? embedCount++ < LC.maxEmbed || !r[6] : r[8] === 4 ? framesCount++ < LC.maxFrames : false;
     if (m.motion === motion) continue;
     m.motion = motion;
     if (motion) lcDetail(id).then((d) => { if (LC.markers.get(id) === m && m.motion) lcMount(id, d, true); });
@@ -760,9 +760,10 @@ function mountPlayer(id, detail, fallbackImg) {
     image: fallbackImg, controls: true, embed: true, trackSnapshot: true,
     onStatus: (label, moving) => {
       badge.textContent = label; badge.style.display = '';
-      if (moving || ['Snapshot', 'Operator player', 'Timelapse · past day'].includes(label)) $('#dMedia').textContent = label;
+      if (moving || ['Snapshot', 'Operator player', 'Timelapse · past day', 'Timelapse · recorded frames'].includes(label)) $('#dMedia').textContent = label;
       note.textContent = moving ? (label === 'Latest clip' ? 'Latest operator clip · loops and refreshes automatically' : 'Streaming live from the operator') : label === 'Snapshot' ? 'Operator snapshot · checking for a newer frame' : label === 'Timelapse · past day' ? 'Recorded views from the past day · autoplaying timelapse, not live video' : label === 'Operator player' ? 'The operator’s own camera player' : '';
     },
+    onFrame: (time) => { note.textContent = 'Recorded timelapse · frame captured ' + new Date(time).toLocaleString(); },
     onSnapshot: ({ state, checkedAt, updatedAt }) => {
       badge.style.display = '';
       const checked = new Date(checkedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -801,10 +802,10 @@ async function openCamera(id, { fly }) {
     </div>
     <div class="mono" style="font-size:9px">Same camera, from the API</div>
     <div class="code"><b>GET</b> /api/go/${esc(id)}<br><b>GET</b> /api/cameras?id=${esc(id)}<br><b>GET</b> /api/nearest?lat=${r[2]}&amp;lon=${r[1]}&amp;limit=10</div>
-    <p class="lic">${src === 'OpenStreetMap' ? 'Location from OpenStreetMap contributors (ODbL).' : `Published as open data by ${esc(src)}.`} The feed belongs to its operator; the atlas only shows and links to it.</p>`;
+    <p class="lic">${src === 'OpenStreetMap' ? 'Location from OpenStreetMap contributors (ODbL).' : `Published publicly by ${esc(src)}.`} The feed belongs to its operator; the atlas only shows and links to it.</p>`;
   $('#drawer').classList.add('open'); $('#drawer').setAttribute('aria-hidden', 'false'); document.body.classList.add('drawer-open');
   $('#dCopy').onclick = async () => { const u = `${location.origin}/api/go/${encodeURIComponent(id)}`; try { await navigator.clipboard.writeText(u); $('#dCopy').textContent = 'Copied'; } catch { prompt('Redirect link', u); } setTimeout(() => $('#dCopy') && ($('#dCopy').textContent = 'Copy redirect link'), 1600); };
-  setFig('Fig. 03 · Camera', src === 'Windy Webcams' ? 'Watch the day unfold.' : r[8] === 2 ? 'Watch the latest clip.' : r[7] === 2 ? 'Watch it live.' : 'Open any of them.', `${r[3].slice(0, 48)} · ${src}`);
+  setFig('Fig. 03 · Camera', src === 'Windy Webcams' || r[8] === 4 ? 'Watch the day unfold.' : r[8] === 2 ? 'Watch the latest clip.' : r[7] === 2 ? 'Watch it live.' : 'Open any of them.', `${r[3].slice(0, 48)} · ${src}`);
   if (fly) map.flyTo({ center: [r[1], r[2]], zoom: Math.max(map.getZoom(), 15.5), duration: 900, padding: window.innerWidth >= 820 ? { right: 440, left: state.origin ? 340 : 0 } : { bottom: window.innerHeight * 0.6 } });
   writeHash();
   const playerBox = $('#dPlayer');

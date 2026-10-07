@@ -65,6 +65,7 @@
     const sources = options.motion === false ? [] : [
       detail.stream_url && ['hls', detail.stream_url],
       detail.video_url && ['clip', detail.video_url],
+      detail.frames_url && ['frames', detail.frames_url],
       options.embed && detail.embed_url && ['embed', detail.embed_url],
     ].filter(Boolean);
 
@@ -76,6 +77,45 @@
       if (!source) return snapshot();
       const [kind, url] = source;
       status(kind === 'clip' ? 'Loading clip…' : 'Connecting…');
+      if (kind === 'frames') {
+        const request = new AbortController();
+        let frames = [], index = 0, next, timer, refresh, frameTimeout, failures = 0;
+        const timeout = setTimeout(() => request.abort(), 12000);
+        const load = async () => {
+          const response = await fetch(url, { signal: request.signal });
+          if (!response.ok) throw new Error('History unavailable');
+          const data = await response.json();
+          if (data.frames?.length < 2) throw new Error('Not enough frames');
+          if (current()) { frames = data.frames; index %= frames.length; }
+        };
+        const tick = () => {
+          if (!current() || document.hidden || next || !frames.length) return;
+          const frame = frames[index++ % frames.length];
+          next = new Image();
+          frameTimeout = setTimeout(() => { if (current()) advance(); }, 10000);
+          next.onload = () => {
+            clearTimeout(frameTimeout); next = null;
+            if (!current()) return;
+            failures = 0; image.src = frame.url; image.hidden = false;
+            if (!image.isConnected) host.append(image);
+            options.onAvailable?.();
+            status('Timelapse · recorded frames'); options.onFrame?.(frame.time);
+          };
+          next.onerror = () => { clearTimeout(frameTimeout); next = null; if (current() && ++failures >= 3) advance(); };
+          next.src = frame.url;
+        };
+        release = () => {
+          request.abort(); clearTimeout(timeout); clearTimeout(frameTimeout); clearInterval(timer); clearInterval(refresh);
+          if (next) { next.onload = next.onerror = null; next.src = ''; next = null; }
+        };
+        try {
+          await load(); clearTimeout(timeout);
+          if (!current()) return;
+          tick(); timer = setInterval(tick, 700);
+          refresh = setInterval(() => { if (!document.hidden) load().catch(() => {}); }, 300000);
+        } catch { if (current()) advance(); }
+        return;
+      }
       if (kind === 'embed') {
         const frame = document.createElement('iframe');
         frame.title = 'Operator’s camera player'; frame.allow = 'autoplay; encrypted-media; fullscreen; picture-in-picture';

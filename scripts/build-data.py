@@ -40,14 +40,20 @@ def feed_key(url):
     query = [(k, v) for k, v in parse_qsl(p.query) if k not in {'_t', 'timestamp', 'cachebust'} and not k.startswith('utm_')]
     return urlunsplit((p.scheme.lower(), p.netloc.lower(), p.path.rstrip('/'), urlencode(sorted(query)), ''))
 
-seen, cams = set(), []
+def camera_keys(c):
+    # Distinct views can share one operator page. Media URLs identify cameras more precisely.
+    media = [c.get(k) for k in ('img', 'stream', 'video', 'embed') if c.get(k)]
+    return {feed_key(k) for k in (media or [c['url']])}
+
+seen = {key for c in all_cams if c['id'] in preserved_ids for key in camera_keys(c)}
+cams = []
 for c in all_cams:
     if c['id'] in preserved_ids:
         cams.append(c)
         continue
     if c['src'] == 'OpenStreetMap' and dom_of(c['url']) in COVERED: continue
     if not (-90 <= c['lat'] <= 90 and -180 <= c['lon'] <= 180) or (c['lat'] == 0 and c['lon'] == 0): continue
-    keys = {feed_key(k) for k in (c['url'], c['img']) if k}
+    keys = camera_keys(c)
     if keys & seen: continue
     seen |= keys; cams.append(c)
 
@@ -112,7 +118,7 @@ for c in cams:
     if c['src'] == 'Windy Webcams' and not c.get('embed'):
         c['embed'] = f"https://webcams.windy.com/webcams/public/embed/player/{c['id'].removeprefix('windy-')}/day?autoplay=1&loop=1"
         c['timelapse'] = True
-    c['mode'] = 2 if (c['stream'] or c['video'] or c['embed']) else 1 if c['img'] else 0
+    c['mode'] = 2 if (c['stream'] or c['video'] or c['embed'] or c.get('frames')) else 1 if c['img'] else 0
 
 cams.sort(key=lambda c: c['id'])
 os.makedirs('data', exist_ok=True)

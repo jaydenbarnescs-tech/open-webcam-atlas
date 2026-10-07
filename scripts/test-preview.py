@@ -75,6 +75,23 @@ async def main():
             await page.evaluate('dispose()')
             print('PASS: unchanged/new/failed snapshot checks report accurately and keep the last frame', flush=True)
 
+            # Recorded frames advance, remain labelled as timelapse, and stop when disposed.
+            await page.route('**/__test/history', lambda r: r.fulfill(json={'frames':[
+                {'url':'/__test/image.png?frame=1','time':1000}, {'url':'/__test/image.png?frame=2','time':2000}]}))
+            await page.evaluate("""() => {
+              window.frameTimes=[]; window.frameLabels=[];
+              window.dispose=AtlasPreview(document.querySelector('#preview'), {image_url:'/__test/image.png',frames_url:'/__test/history'}, {onFrame:t=>frameTimes.push(t),onStatus:s=>frameLabels.push(s)});
+            }""")
+            await page.wait_for_function('new Set(frameTimes).size === 2')
+            assert await page.evaluate("frameLabels.includes('Timelapse · recorded frames') && !frameLabels.includes('Live video')")
+            await page.evaluate('dispose();window.stoppedAt=frameTimes.length')
+            await page.wait_for_timeout(900)
+            assert await page.evaluate('frameTimes.length===stoppedAt')
+            await page.evaluate("""() => { window.fallbackLabels=[];window.dispose=AtlasPreview(document.querySelector('#preview'), {image_url:'/__test/image.png',frames_url:'/__test/broken-history'}, {onStatus:s=>fallbackLabels.push(s)}); }""")
+            await page.wait_for_function("fallbackLabels.includes('Snapshot')")
+            await page.evaluate('dispose()')
+            print('PASS: recorded frames advance, dispose cleanly, and fall back to snapshots', flush=True)
+
             rows = [[f'fixture-{i}', lon, lat, f'Camera {i}', 0, 0, '/__test/image.png', 2, 2]
                     for i, (lon, lat) in enumerate([(139.70, 35.68), (139.704, 35.682), (139.708, 35.684), (142, 35)])]
             await page.route('**/data/cams.json', lambda r: r.fulfill(json={'cats':['traffic','scenic'], 'srcs':['Fixture'], 'rows':rows}))

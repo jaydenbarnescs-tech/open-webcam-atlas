@@ -3,13 +3,13 @@
 Every open, public webcam we could find, on one monochrome globe — plus a tiny API that
 returns the closest cameras to any GPS point, or redirects you straight to the nearest feed.
 
-- **109,445 cameras from 36 open sources in 127 countries.** Live streams, operator clips and
+- **112,696 cameras from 39 open sources in 127 countries.** Live streams, operator clips and
   recorded timelapses play where available; snapshot-only cameras update at their operator’s pace.
 - **Globe:** MapLibre GL (globe projection) + OpenFreeMap vector tiles. Black country borders,
   black buildings once you zoom in, halftone camera clusters.
 - **Dashboard:** search an address, see cameras in the vicinity, narrow by radius, category,
   source and "has a live image".
-- **No keys, no database.** Static site + four Vercel functions.
+- **No keys, no database.** Static site + five Vercel functions.
 
 ## Sources
 
@@ -33,6 +33,17 @@ returns the closest cameras to any GPS point, or redirects you straight to the n
 | Osaka, Japan | 127 prefectural river cameras | [Official river portal](https://www.osaka-kasen-portal.net/suibou/public/ja/gis.html), catalogue joined with its published map coordinates |
 | Kyoto, Japan | 58 road cameras + 23 official tourism live streams | [Prefecture roads](https://dobokubousai.pref.kyoto.jp/pc/) and [official tourism camera list](https://www.kyokanko.or.jp/news/20260812) |
 
+| Japan | Weathernews: 2,913 public weather cameras | [Public camera map](https://weathernews.jp/onebox/livecam/zoom-map/), published GeoJSON coordinates and recorded image history |
+| Hyogo, Japan | 325 public river/dam cameras with images | [Prefectural camera map](https://hyogo.kasenkanshi.info/), public station metadata and image URLs |
+| Osaka / Kyoto / Kobe, Japan | 13 Hanshin weather/river views | [Operator camera pages](https://hce.hanshin.co.jp/weathercam/), published map coordinates and 30-second snapshots |
+
+Japan coverage is still partial. As of 2026-10-07, the index has 4,642 Japanese camera records.
+Within 10 km of the city centres there are 62 Osaka and 51 Kyoto records; within 25 km,
+262 and 120. These are catalogue counts, not a claim to include every public camera.
+Other identified gaps include the [national-road office networks](https://www.kkr.mlit.go.jp/road/strategy/camera.html)
+(which need their camera locations matched) and Kyoto's prefectural river portal (our access is blocked).
+Keep distinct views even when they share an operator page; deduplicate by media URLs.
+
 ## API
 
 All endpoints are `GET`, CORS-open, no key.
@@ -43,6 +54,7 @@ All endpoints are `GET`, CORS-open, no key.
 | `/api/go?lat=..&lon=..` | 302 redirect to the closest camera's feed (`&video=1` for the live stream/clip, `&image=1` for the still) |
 | `/api/go/{id}` | 302 redirect to one camera |
 | `/api/cameras?id=..` | One camera's full record. No id → dataset totals |
+| `/api/frames?id=..` | Recent recorded frames and their capture times for supported cameras |
 | `/api/snapshot?id=..` | Current image bytes for a known camera, with a frame hash and upstream modification time when available |
 
 `/nearest` and `/go` accept: `limit` (1–200), `radius_km`, `category` (`traffic,scenic,water,weather,other`),
@@ -66,10 +78,11 @@ Single cameras show previews at every map zoom. `public/preview.js` shares the d
 player: muted live HLS, then looping MP4 clips, then automatically refreshed snapshots
 (including operator embeds). Clips reload at the operator's update interval.
 Windy cameras use their public autoplaying day-timelapse player, clearly labelled as recorded
-imagery rather than live video. The drawer compares snapshot bytes and distinguishes new
+imagery rather than live video. Weathernews plays a bounded sequence of its published
+recorded frames, shows capture times, and falls back to the latest still if history fails. The drawer compares snapshot bytes and distinguishes new
 frames, unchanged frames, and failed refreshes. Kyoto road images are resolved from the
 latest operator catalogue on each cache refresh, so dated image filenames do not freeze.
-Map video playback is limited to the nearest 4 HLS, 8 MP4, and 2 embedded feeds; other cameras retain
+Map video playback is limited to the nearest 4 HLS, 8 MP4, 2 embedded feeds, and 4 recorded-frame sequences; other cameras retain
 refreshing pictures, and feeds with no snapshot can still play. Offscreen players are disposed.
 
 Browser regression checks (requires Python Playwright with WebKit and `ffmpeg`, plus the
@@ -77,7 +90,7 @@ local server above):
 
 ```bash
 python3 scripts/test-preview.py http://localhost:3000
-node --test scripts/snapshot.test.mjs
+node --test scripts/snapshot.test.mjs scripts/frames.test.mjs
 ```
 
 The checks use generated media and fixture cameras to verify fallback, playback cleanup,
@@ -89,6 +102,7 @@ singleton thumbnails, cluster expansion, filters, and mobile playback without op
 rm -rf raw && python3 scripts/build-data.py     # re-downloads every source (~5 min), rebuilds data/ and public/data/
 WINDY_API_KEY=xxx python3 scripts/build-data.py # also pull Windy's worldwide network
 python3 scripts/build-data.py --sources osaka kyoto_roads kyoto_tourism # retain other sources
+python3 scripts/build-data.py --sources weathernews hyogo_rivers hanshin
 ```
 Kyoto tourism locations are named-landmark positions (OSM/official tourism maps), not surveyed
 camera mounts; the camera detail explains this. The two official YouTube channels are refreshed

@@ -461,9 +461,79 @@ def kyoto_tourism():
     return out
 
 
+def weathernews():
+    """The operator's public map feed (including its nationwide community sky cameras)."""
+    data = json.loads(get('https://weathernews.jp/onebox/livecam/api/livecam/geojson'))
+    out = []
+    for feature in data['features']:
+        p = feature['properties']; lon, lat = feature['geometry']['coordinates']
+        if not p.get('image') or not p.get('link'): continue
+        c = cam('weathernews-' + p['camid'], lat, lon, p['name'], 'weather', 'Weathernews Japan', 'JP',
+                'https://weathernews.jp/onebox/livecam' + p['link'], img=p['image'], refresh=60)
+        c['frames'] = 'weathernews'
+        c['timelapse'] = True
+        out.append(c)
+    return out
+
+
+def html_tags(body, tag):
+    from html.parser import HTMLParser
+    class Tags(HTMLParser):
+        def __init__(self): super().__init__(); self.tags = []
+        def handle_starttag(self, name, attrs):
+            if name == tag: self.tags.append(dict(attrs))
+    parser = Tags(); parser.feed(body)
+    return parser.tags
+
+
+def hyogo_rivers():
+    """Public prefectural map metadata; use only its openly linked camera images."""
+    body = get('https://hyogo.kasenkanshi.info/')
+    top = next(a for a in html_tags(body, 'div') if a.get('id') == 'top')
+    out = []
+    for kind in ['river', 'dam']:
+        for p in json.loads(top['data-' + kind + '-cameras']):
+            link = p.get(kind + '_camera_source_link') or {}
+            image = link.get('camera_image_url')
+            if not p.get('is_shown') or not p.get('has_camera_image') or not image: continue
+            if urlparse(image).hostname not in {'camera.hyogo.kasenkanshi.info', 'scamera.hyogo.kasenkanshi.info', 'www.mizumori.jp'}: continue
+            station = p[kind + '_station']
+            label = ' · '.join(filter(None, [station.get('river_name'), station.get('station_name') or station.get('dam_name'),
+                                             (p.get('dam_stream_type_master') or {}).get('name'), station.get('city_name')]))
+            url = p['detail_url']
+            if kind == 'dam': url += '?camera_id_name=' + p['id_name']
+            out.append(cam('hyogo-' + kind + '-' + str(p['id']), p['latitude'], p['longitude'], label, 'water',
+                           'Hyogo Prefecture Rivers', 'JP', url, img=image, refresh=300))
+    return out
+
+
+def hanshin():
+    """Camera views and coordinates published on Hanshin Cable Engineering's own pages."""
+    from urllib.parse import urljoin
+    base = 'https://hce.hanshin.co.jp'
+    body = get(base + '/weathercam/')
+    pages = sorted({urljoin(base, a['href']) for a in html_tags(body, 'a') if '/weathercam/area/' in a.get('href', '')})
+    out = []
+    for url in pages:
+        body = get(url)
+        script = next(a['src'] for a in html_tags(body, 'script') if 'gmap-' in a.get('src', ''))
+        js = get(urljoin(base, script))
+        match = re.search(r'var classJson\s*=\s*(\{[\s\S]*?\});', js)
+        if not match: raise ValueError('Hanshin camera map format changed')
+        positions = json.loads(re.sub(r',\s*}', '}', match[1]))
+        images = list(dict.fromkeys(a['src'] for a in html_tags(body, 'img') if '/upload/' in a.get('src', '')))
+        for (key, position), image in zip(positions.items(), images):
+            # The operator uses drawMap(id) to select a map pin; image URL identifies each distinct view.
+            c = cam('hanshin-' + url.rstrip('/').split('/')[-1] + '-' + key, position['lat'], position['lng'],
+                    '白川・動物園前付近' if 'shirakawa_zoo' in url else position['title'], 'weather',
+                    'Hanshin Weather Cameras', 'JP', url, img=urljoin(base, image), refresh=30)
+            out.append(c)
+    return out
+
+
 def _safe(fn, *a):
     try: return fn(*a)
     except Exception as ex: print(f'  ! {getattr(fn, "__name__", fn)}{a}: {ex}'); return []
 
 
-ALL = [osm, krk, usgs_hivis, nyc, caltrans, p511, wsdot, tripcheck, iowa, drivebc, tfl, digitraffic, iceland, fotowebcam, hongkong, singapore, nz, nsw, qld, windy, osaka, kyoto_roads, kyoto_tourism]
+ALL = [osm, krk, usgs_hivis, nyc, caltrans, p511, wsdot, tripcheck, iowa, drivebc, tfl, digitraffic, iceland, fotowebcam, hongkong, singapore, nz, nsw, qld, windy, osaka, kyoto_roads, kyoto_tourism, weathernews, hyogo_rivers, hanshin]

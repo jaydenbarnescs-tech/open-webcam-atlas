@@ -32,6 +32,7 @@ export function shape(c, origin, base = '') {
     feed_url: c.url, image_url: c.img || null, stream_url: c.stream || null, video_url: c.video || null, embed_url: c.embed || null,
     refresh_s: c.refresh || null,
     snapshot_url: c.img ? `/api/snapshot?id=${encodeURIComponent(c.id)}` : null,
+    frames_url: c.frames ? `/api/frames?id=${encodeURIComponent(c.id)}` : null,
     playback_kind: c.timelapse ? 'timelapse' : c.stream ? 'live' : c.video ? 'clip' : c.embed ? 'embed' : 'snapshot',
     location_note: c.location_note || null,
     go: `${base}/api/go/${encodeURIComponent(c.id)}`,

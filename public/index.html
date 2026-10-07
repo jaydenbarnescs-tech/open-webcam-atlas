@@ -350,7 +350,7 @@ function circle(lon, lat, km, n = 96) { const pts = []; for (let i = 0; i <= n; 
 /* ---------- canvas icons ---------- */
 function rng(seed) { return () => (seed = (seed * 16807) % 2147483647) / 2147483647; }
 // Crisp halftone discs: one image per size bucket so the dot pitch stays ~4.5 css px at every size.
-const HT_SIZES = [24, 32, 44, 58, 76, 100]; // css px diameter of the main disc
+const HT_SIZES = [9, 12, 16, 21, 27, 34]; // css px diameter of the main disc
 function halftone(bucket, seed) {
   const PR = 2, D = HT_SIZES[bucket], S = Math.round(D * 1.9) * PR, c = document.createElement('canvas'); c.width = c.height = S;
   const g = c.getContext('2d'); const r = rng(seed * 7919 + bucket * 31 + 13);
@@ -439,7 +439,7 @@ async function loadData() {
 }
 
 function addLayers() {
-  map.addSource('cams', { type: 'geojson', data: filteredFeatures(), cluster: true, clusterRadius: 58, clusterMaxZoom: 11, promoteId: 'id' });
+  map.addSource('cams', { type: 'geojson', data: filteredFeatures(), cluster: true, clusterRadius: 30, clusterMaxZoom: 11, promoteId: 'id' });
   map.addSource('search', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
   map.addSource('hits', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
   map.addSource('sel', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
@@ -451,7 +451,7 @@ function addLayers() {
     layout: { 'icon-image': ['concat', 'ht-', ['step', ['get', 'point_count'], '0', 10, '1', 40, '2', 150, '3', 500, '4', 1500, '5'], '-', ['to-string', ['%', ['get', 'cluster_id'], 3]]],
       'icon-size': 1, 'icon-allow-overlap': true, 'icon-ignore-placement': true,
       'text-field': ['get', 'point_count_abbreviated'], 'text-font': ['Noto Sans Regular'], 'text-size': 10, 'text-letter-spacing': 0.18,
-      'text-offset': ['step', ['get', 'point_count'], ['literal', [0, 1.9]], 10, ['literal', [0, 2.3]], 40, ['literal', [0, 2.9]], 150, ['literal', [0, 3.6]], 500, ['literal', [0, 4.5]], 1500, ['literal', [0, 5.7]]],
+      'text-offset': ['step', ['get', 'point_count'], ['literal', [0, 1.0]], 10, ['literal', [0, 1.2]], 40, ['literal', [0, 1.5]], 150, ['literal', [0, 1.8]], 500, ['literal', [0, 2.2]], 1500, ['literal', [0, 2.7]]],
       'text-allow-overlap': false },
     paint: { 'text-color': '#555', 'text-halo-color': '#ffffff', 'text-halo-width': 3 } });
 

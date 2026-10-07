@@ -68,6 +68,11 @@ async def main():
             assert await page.evaluate('__atlas.map.getZoom() < 15')
             await page.wait_for_function("document.querySelector('.lc video')?.currentTime > 0.1")
             assert await page.locator('.lc').count() == 1, 'Clustered cameras must not get duplicate thumbnails'
+            assert await page.evaluate('''() => {
+              const m = __atlas.map, p = m.project([142,35]), c = m.getCanvas().getBoundingClientRect();
+              const r = document.querySelector('.lc').getBoundingClientRect();
+              return Math.abs(r.x+r.width/2-c.x-p.x)<2 && Math.abs(r.y+r.height/2-c.y-p.y)<2;
+            }'''), 'Preview must stay anchored to the camera coordinate'
             cluster = await page.evaluate('''() => {
               const m = __atlas.map, f = m.queryRenderedFeatures({layers:['clusters']})[0];
               const p = m.project(f.geometry.coordinates), r = m.getCanvas().getBoundingClientRect();

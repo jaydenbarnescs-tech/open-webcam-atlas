@@ -7,7 +7,7 @@ Camera dict: id, lat, lon, name, cat (traffic|scenic|water|weather|other), src (
 country (ISO-2), url (operator page or image), img (still), stream (HLS m3u8), video (mp4 clip),
 embed (iframe url), refresh (seconds between new stills, if known).
 """
-import json, os, re, hashlib, html
+import json, os, re, hashlib, html, time
 import urllib.request, urllib.error
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse, quote
@@ -46,6 +46,8 @@ def cam(id, lat, lon, name, cat, src, country, url, img=None, stream=None, video
 
 # ---------------------------------------------------------------- OpenStreetMap
 SKIP_DOMAINS = {'pioupiou.com', 'balisemeteo.com'}
+# social/profile pages are never a camera feed (e.g. a CCTV installer's Facebook page)
+SOCIAL_DOMAINS = {'facebook.com', 'fb.com', 'instagram.com', 'vk.com', 'linkedin.com', 'twitter.com', 'x.com', 'tiktok.com', 'wa.me'}
 SCENIC = ('foto-webcam', 'feratel', 'skaping', 'bergfex', 'webcam-hd', 'youtube', 'youtu.be', 'webcams.travel', 'windy.com',
           'earthcam', 'roundshot', 'panomax', 'livecam', 'webcamera', 'skylinewebcams', 'camstreamer', 'ipcamlive', 'rtsp.me')
 TRAFFIC = ('traffic', '511', 'dot.', 'roads', 'dgt.es', 'asfinag', 'vegvesen', 'verkehr', 'tripcheck', 'informo', 'chart.maryland',
@@ -80,7 +82,7 @@ def osm():
         url = (t.get('contact:webcam') or t.get('webcam') or t.get('website') or '').split(';')[0].strip()
         if not url.startswith('http'): continue
         dom = urlparse(url).netloc.lower().replace('www.', '')
-        if dom in SKIP_DOMAINS: continue
+        if dom in SKIP_DOMAINS or any(dom == d or dom.endswith('.' + d) for d in SOCIAL_DOMAINS): continue
         lat = e.get('lat') or e.get('center', {}).get('lat'); lon = e.get('lon') or e.get('center', {}).get('lon')
         if lat is None: continue
         zone, mm = t.get('surveillance:zone', ''), t.get('man_made', '')
@@ -139,8 +141,11 @@ def p511_host(host):
     rows, start = [], 0
     while True:
         q = quote(json.dumps({'columns': [], 'start': start, 'length': 100}))
-        try: d = json.loads(cached(f'p511_{host}_{start}.json', f'https://{host}/List/GetData/Cameras?query={q}&lang=en', timeout=60))
-        except Exception: break
+        d = None
+        for attempt in range(4):
+            try: d = json.loads(cached(f'p511_{host}_{start}.json', f'https://{host}/List/GetData/Cameras?query={q}&lang=en', timeout=60)); break
+            except Exception: time.sleep(2 * (attempt + 1))
+        if d is None: print(f'  511 {host}: gave up at start={start}'); break
         page = d.get('data', [])
         rows += page; start += len(page)
         if not page or start >= d.get('recordsTotal', 0): break
@@ -298,24 +303,86 @@ def qld():
     return out
 
 
+# ---------------------------------------------------------------- portals expanded in full
+def krk():
+    """cam.krk.ru (Krasnoyarsk city cameras, CC BY-SA). The camera list is embedded in the homepage HTML as
+    rootScope={"cameras":[...]}; the JSON has `'flutoken': ''` (single quotes) which must be fixed first."""
+    page = cached('krk.html', 'https://cam.krk.ru/', headers={'User-Agent': 'Mozilla/5.0 (compatible; open-webcam-atlas)'})
+    m = re.search(r'rootScope\s*=\s*(\{"cameras":.*?\});', page, re.S)
+    blob = re.sub(r"""(["']?flutoken["']?)\s*:\s*''""", '"flutoken": ""', m.group(1))
+    out = []
+    for c in json.loads(blob)['cameras']:
+        if c.get('latitude') is None or c.get('longitude') is None: continue
+        out.append(cam(f"krk-{c['id']}", c['latitude'], c['longitude'], c.get('title') or f"Krasnoyarsk {c['id']}", 'traffic',
+                       'cam.krk.ru', 'RU', f"https://cam.krk.ru/camera/{c['id']}",
+                       img=f"https://cam.krk.ru/api/v1/web/preview_images/{c['id']}?flutoken=",
+                       stream=f"https://fluserver.orionnet.online/cam{c['id']}/index.m3u8", refresh=60))
+    return out
+
+
+def usgs_hivis():
+    """USGS HIVIS river cameras (public domain) via the open NIMS API behind apps.usgs.gov/hivis."""
+    out = []
+    for c in json.loads(cached('usgs_nims.json', 'https://api.waterdata.usgs.gov/nims/v0/cameras?enabled=true')):
+        if c.get('hideCam') or not c.get('newestImageDT'): continue
+        try: lat, lon = float(c['lat']), float(c['lng'])
+        except (TypeError, ValueError): continue
+        out.append(cam(f"usgs-{c['camId']}", lat, lon, c.get('camDesc') or c.get('camName'), 'water', 'USGS HIVIS', 'US',
+                       f"https://apps.usgs.gov/hivis/camera/{c['camId']}",
+                       img=f"{c['smallDir']}{c['camId']}_newest.jpg", refresh=900))
+    return out
+
+
 # ---------------------------------------------------------------- optional, keyed sources
 def windy():
-    """Windy Webcams API v3 (~70k webcams worldwide, incl. Japan). Needs a free key in WINDY_API_KEY."""
+    """Windy Webcams API v3 (~69k webcams worldwide, incl. Japan). Needs a free key in WINDY_API_KEY.
+    The free tier rejects offset > 1000 ("Offset is over API tier limit"), so the world is cut into bbox tiles
+    (north,east,south,west) that are split until each holds <= 1050 cameras, then paged 50 at a time."""
     key = os.environ.get('WINDY_API_KEY')
     if not key: print('  windy: skipped (set WINDY_API_KEY)'); return []
-    out, off = [], 0
-    while True:
-        url = f'https://api.windy.com/webcams/api/v3/webcams?limit=50&offset={off}&include=location,images,player,urls,categories'
-        try: d = json.loads(get(url, headers={'x-windy-api-key': key}))
-        except Exception as ex: print('  windy stop', off, ex); break
-        for w in d.get('webcams', []):
-            loc = w.get('location') or {}; im = (w.get('images') or {}).get('current') or {}; pl = w.get('player') or {}
-            cats = [c.get('id') for c in w.get('categories') or []]
-            out.append(cam(f"windy-{w['webcamId']}", loc['latitude'], loc['longitude'], w.get('title'), 'traffic' if 'traffic' in cats else 'scenic',
-                           'Windy Webcams', (loc.get('country_code') or '').upper(), (w.get('urls') or {}).get('detail') or '',
-                           img=im.get('preview'), embed=pl.get('live') or pl.get('day')))
-        off += 50
-        if off >= d.get('total', 0) or not d.get('webcams'): break
+    base = 'https://api.windy.com/webcams/api/v3/webcams'
+    hdr = {'x-windy-api-key': key}
+
+    def call(q):
+        for attempt in range(4):
+            try: return json.loads(get(f'{base}?{q}', headers=hdr, timeout=40))
+            except Exception as ex:
+                if '400' in str(ex): return None
+                time.sleep(1.5 * (attempt + 1))
+        return None
+
+    def tile_rows(n, e, s, w, depth=0):
+        bb = f'bbox={n},{e},{s},{w}'
+        d = call(f'limit=1&offset=0&{bb}')
+        if not d: return []
+        total = d.get('total', 0)
+        if total == 0: return []
+        if total > 1050 and (n - s) > 0.02:
+            mlat, mlon = (n + s) / 2, (e + w) / 2
+            rows = []
+            for sub in ((n, e, mlat, mlon), (n, mlon, mlat, w), (mlat, e, s, mlon), (mlat, mlon, s, w)): rows += tile_rows(*sub, depth + 1)
+            return rows
+        rows = []
+        for off in range(0, min(total, 1050), 50):
+            d = call(f'limit=50&offset={off}&{bb}&include=location,images,player,urls,categories')
+            if not d: break
+            rows += d.get('webcams', [])
+        return rows
+
+    tiles = [(90, 180, 0, 0), (90, 0, 0, -180), (0, 180, -90, 0), (0, 0, -90, -180)]
+    seen, out = set(), []
+    with ThreadPoolExecutor(4) as ex:
+        for rows in ex.map(lambda tl: tile_rows(*tl), tiles):
+            for w_ in rows:
+                if w_['webcamId'] in seen or w_.get('status') != 'active': continue
+                seen.add(w_['webcamId'])
+                loc = w_.get('location') or {}; im = (w_.get('images') or {}).get('current') or {}; pl = w_.get('player') or {}
+                ids = [c.get('id') for c in w_.get('categories') or []]
+                cat = 'traffic' if 'traffic' in ids else 'weather' if ids == ['meteo'] else 'water' if {'lake', 'river'} & set(ids) else 'scenic'
+                out.append(cam(f"windy-{w_['webcamId']}", loc['latitude'], loc['longitude'],
+                               ' › '.join(filter(None, [loc.get('city'), w_.get('title', '').split('›')[-1].strip()])) or w_.get('title'), cat,
+                               'Windy Webcams', (loc.get('country_code') or '').upper(), (w_.get('urls') or {}).get('detail') or f"https://www.windy.com/webcams/{w_['webcamId']}",
+                               img=im.get('preview') or im.get('thumbnail'), embed=pl.get('live'), refresh=600))
     return out
 
 
@@ -324,4 +391,4 @@ def _safe(fn, *a):
     except Exception as ex: print(f'  ! {getattr(fn, "__name__", fn)}{a}: {ex}'); return []
 
 
-ALL = [osm, nyc, caltrans, p511, wsdot, tripcheck, iowa, drivebc, tfl, digitraffic, iceland, fotowebcam, hongkong, singapore, nz, nsw, qld, windy]
+ALL = [osm, krk, usgs_hivis, nyc, caltrans, p511, wsdot, tripcheck, iowa, drivebc, tfl, digitraffic, iceland, fotowebcam, hongkong, singapore, nz, nsw, qld, windy]

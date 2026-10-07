@@ -4,7 +4,7 @@ Usage:  python3 scripts/build-data.py            (uses raw/ cache; delete raw/ t
 import json, os, re, sys, collections, time
 from concurrent.futures import ThreadPoolExecutor
 import urllib.request
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 sys.path.insert(0, os.path.dirname(__file__))
 import sources as S
 
@@ -14,9 +14,22 @@ with ThreadPoolExecutor(10) as ex:
     for fn, res in zip(S.ALL, ex.map(lambda f: S._safe(f), S.ALL)):
         print(f'{fn.__name__:12s} {len(res):6d}'); all_cams += res
 
+# ---- a source that returns nothing today (blocked IP, outage) keeps its last good records instead of vanishing
+OLD_PATH = 'data/cameras.json'
+if os.path.exists(OLD_PATH):
+    old = json.load(open(OLD_PATH)); got = {c['src'] for c in all_cams}
+    for src in sorted({c['src'] for c in old} - got - {'OpenStreetMap'}):
+        keep = [c for c in old if c['src'] == src]; all_cams += keep
+        print(f'  carried over {len(keep)} cameras from {src} (source returned nothing this run)')
+
+# ---- portals expanded in full by their own source: drop the single OSM pins that point into them
+COVERED = {'cam.krk.ru', 'apps.usgs.gov'}
+def dom_of(u): return urlparse(u or '').netloc.lower().replace('www.', '').split(':')[0]
+
 # ---- dedupe (same feed url, or same image) and sanity-check coordinates
 seen, cams = set(), []
 for c in all_cams:
+    if c['src'] == 'OpenStreetMap' and dom_of(c['url']) in COVERED: continue
     if not (-90 <= c['lat'] <= 90 and -180 <= c['lon'] <= 180) or (c['lat'] == 0 and c['lon'] == 0): continue
     keys = {k.split('?')[0].lower().rstrip('/') for k in (c['url'], c['img']) if k}
     if keys & seen: continue
@@ -25,6 +38,8 @@ for c in all_cams:
 # ---- probe link-only pages: find an embeddable page, a YouTube player, an HLS stream or a camera still
 PROBE_PATH = os.path.join(S.RAW, 'probe.json')
 probe = json.load(open(PROBE_PATH)) if os.path.exists(PROBE_PATH) else {}
+# a seller's page (CCTV installer, shop) has several of these and no camera media
+SHOP = re.compile(r'add to cart|add-to-cart|buy now|checkout|shopping cart|price list|\bprice\b|купить|цена|корзин|販売|カートに入れる|ご購入|見積', re.I)
 IMG_HINT = re.compile(r'(webcam|current|live|cam|snapshot|latest|image)', re.I)
 
 def probe_url(u):
@@ -37,6 +52,8 @@ def probe_url(u):
             if 'html' not in ct: return res
             xfo = (r.headers.get('X-Frame-Options') or '').lower(); csp = (r.headers.get('Content-Security-Policy') or '').lower()
             body = r.read(400_000).decode('utf-8', 'replace')
+        low = body.lower()
+        if len(SHOP.findall(low)) >= 3: res['shop'] = True
         fa = re.search(r'frame-ancestors([^;]*)', csp)
         frameable = not xfo and (not fa or '*' in fa.group(1).split())
         if frameable and final.startswith('https://'): res['embed'] = final
@@ -61,6 +78,11 @@ print('probing', len(todo), 'operator pages...')
 with ThreadPoolExecutor(64) as ex:
     for u, r in zip(todo, ex.map(probe_url, todo)): probe[u] = r
 json.dump(probe, open(PROBE_PATH, 'w'))
+shops = {c['id'] for c in cams if c['src'] == 'OpenStreetMap' and (probe.get(c['url']) or {}).get('shop')
+         and not (c['img'] or c['embed'] or c['stream'] or c['video'])
+         and not any((probe.get(c['url']) or {}).get(k) for k in ('img', 'embed', 'stream'))}
+print('dropping', len(shops), 'non-camera (shop) OSM entries')
+cams = [c for c in cams if c['id'] not in shops]
 for c in cams:
     p = probe.get(c['url'])
     if p and not c['img'] and not c['embed']:
@@ -74,12 +96,8 @@ cams.sort(key=lambda c: c['id'])
 os.makedirs('data', exist_ok=True)
 json.dump(cams, open('data/cameras.json', 'w'), separators=(',', ':'), ensure_ascii=False)
 
-CATS = ['traffic', 'scenic', 'water', 'weather', 'other']
-srcs = [s for s, _ in collections.Counter(c['src'] for c in cams).most_common()]
-os.makedirs('public/data', exist_ok=True)
-json.dump({'cats': CATS, 'srcs': srcs,
-           'rows': [[c['id'], round(c['lon'], 5), round(c['lat'], 5), c['name'], CATS.index(c['cat']), srcs.index(c['src']), c['img'] or 0, c['mode']] for c in cams]},
-          open('public/data/cams.json', 'w'), separators=(',', ':'), ensure_ascii=False)
+from compact import write_compact
+write_compact(cams)
 print(f'\n{len(cams)} cameras from {len(srcs)} sources in {time.time() - t0:.0f}s')
 print('modes:', dict(collections.Counter(c['mode'] for c in cams)), ' cats:', dict(collections.Counter(c['cat'] for c in cams)))
 print('countries:', len({c["country"] for c in cams if c["country"]}))

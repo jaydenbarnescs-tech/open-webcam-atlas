@@ -3,7 +3,7 @@
 Every open, public webcam we could find, on one monochrome globe — plus a tiny API that
 returns the closest cameras to any GPS point, or redirects you straight to the nearest feed.
 
-- **38,000+ cameras from 30 open sources in 21 countries.** About 6,900 play live video (HLS streams, MP4 clips or the
+- **109,000+ cameras from 33 open sources in 127 countries.** About 6,900 play live video (HLS streams, MP4 clips or the
   operator's embedded player), ~29,000 are live stills that refresh in place, and fewer than 2,000 are link-only.
 - **Globe:** MapLibre GL (globe projection) + OpenFreeMap vector tiles. Black country borders,
   black buildings once you zoom in, halftone camera clusters.
@@ -27,7 +27,9 @@ returns the closest cameras to any GPS point, or redirects you straight to the n
 | Singapore | LTA traffic images | data.gov.sg |
 | New Zealand | NZTA | trafficnz.info |
 | Australia | Live Traffic NSW, QLDTraffic | open feeds |
-| Worldwide (optional) | Windy Webcams (~70k incl. Japan) | set `WINDY_API_KEY` (free key) |
+| Worldwide | Windy Webcams (~67k incl. Japan), free tier, bbox-tiled because offset is capped at 1000 | `WINDY_API_KEY` (free key); links back to Windy |
+| Russia | cam.krk.ru Krasnoyarsk, all 281 cameras (CC BY-SA, live HLS) | list embedded in the homepage |
+| USA | USGS HIVIS river cameras (public domain) | open NIMS API `api.waterdata.usgs.gov/nims` |
 
 ## API
 

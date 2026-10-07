@@ -7,12 +7,14 @@ import urllib.request
 from urllib.parse import urljoin, urlparse, urlsplit, urlunsplit, parse_qsl, urlencode
 sys.path.insert(0, os.path.dirname(__file__))
 import sources as S
+import quality as Q
 
 t0 = time.time()
 parser = argparse.ArgumentParser()
 parser.add_argument('--sources', nargs='+', help='Refresh only these source functions, retaining all other sources')
+parser.add_argument('--clean-only', action='store_true', help='Apply camera quality rules to the existing index without downloading sources')
 args = parser.parse_args()
-functions = [f for f in S.ALL if not args.sources or f.__name__ in args.sources]
+functions = [] if args.clean_only else [f for f in S.ALL if not args.sources or f.__name__ in args.sources]
 if args.sources and set(args.sources) - {f.__name__ for f in functions}: parser.error('Unknown source function')
 all_cams = []
 with ThreadPoolExecutor(10) as ex:
@@ -24,9 +26,9 @@ OLD_PATH = 'data/cameras.json'
 preserved_ids = set()
 if os.path.exists(OLD_PATH):
     old = json.load(open(OLD_PATH)); got = {c['src'] for c in all_cams}
-    for src in sorted({c['src'] for c in old} - got - (set() if args.sources else {'OpenStreetMap'})):
+    for src in sorted({c['src'] for c in old} - got - (set() if args.sources or args.clean_only else {'OpenStreetMap'})):
         keep = [c for c in old if c['src'] == src]; all_cams += keep
-        if args.sources: preserved_ids.update(c['id'] for c in keep)
+        if args.sources or args.clean_only: preserved_ids.update(c['id'] for c in keep)
         print(f'  carried over {len(keep)} cameras from {src} (source returned nothing this run)')
 
 # ---- portals expanded in full by their own source: drop the single OSM pins that point into them
@@ -60,56 +62,41 @@ for c in all_cams:
 # ---- probe link-only pages: find an embeddable page, a YouTube player, an HLS stream or a camera still
 PROBE_PATH = os.path.join(S.RAW, 'probe.json')
 probe = json.load(open(PROBE_PATH)) if os.path.exists(PROBE_PATH) else {}
-# a seller's page (CCTV installer, shop) has several of these and no camera media
-SHOP = re.compile(r'add to cart|add-to-cart|buy now|checkout|shopping cart|price list|\bprice\b|купить|цена|корзин|販売|カートに入れる|ご購入|見積', re.I)
-IMG_HINT = re.compile(r'(webcam|current|live|cam|snapshot|latest|image)', re.I)
-
 def probe_url(u):
-    res = {}
+    if not Q.public_url(u): return {'quality_version': Q.VERSION, 'excluded': 'non_public_url'}
     try:
-        req = urllib.request.Request(u, headers={'User-Agent': 'Mozilla/5.0 (compatible; open-webcam-atlas)', 'Accept': 'text/html,image/*'})
+        req = urllib.request.Request(u, headers={'User-Agent': S.UA, 'Accept': 'text/html,image/*'})
         with urllib.request.urlopen(req, timeout=10) as r:
             ct = r.headers.get('Content-Type', ''); final = r.geturl()
-            if ct.startswith('image/'): return {'img': final}
-            if 'html' not in ct: return res
-            xfo = (r.headers.get('X-Frame-Options') or '').lower(); csp = (r.headers.get('Content-Security-Policy') or '').lower()
-            body = r.read(400_000).decode('utf-8', 'replace')
-        low = body.lower()
-        if len(SHOP.findall(low)) >= 3: res['shop'] = True
-        fa = re.search(r'frame-ancestors([^;]*)', csp)
-        frameable = not xfo and (not fa or '*' in fa.group(1).split())
-        if frameable and final.startswith('https://'): res['embed'] = final
-        yt = re.search(r'(?:youtube(?:-nocookie)?\.com/embed/|youtube\.com/watch\?v=)([\w-]{11})', body)
-        if yt: res['embed'] = f'https://www.youtube-nocookie.com/embed/{yt.group(1)}?autoplay=1&mute=1&playsinline=1'
-        m3 = re.search(r'https://[^"\'\s<>]+\.m3u8[^"\'\s<>]*', body)
-        if m3: res['stream'] = m3.group(0)
-        for m in re.finditer(r'<img[^>]+src=["\']([^"\']+\.(?:jpe?g|png|webp)[^"\']*)["\']', body, re.I):
-            src = urljoin(final, html_unescape(m.group(1)))
-            if IMG_HINT.search(src) and not re.search(r'logo|icon|banner|sprite|avatar', src, re.I): res['img'] = src; break
-        if 'img' not in res:
-            og = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)', body, re.I)
-            if og and IMG_HINT.search(og.group(1)) and not re.search(r'logo|icon|share|default', og.group(1), re.I): res['img'] = urljoin(final, og.group(1))
+            if ct.startswith('image/') and Q.camera_image(final, direct=True): return {'quality_version': Q.VERSION, 'img': final}
+            if 'html' not in ct: return {'quality_version': Q.VERSION}
+            return Q.extract_media(r.read(600_000).decode('utf-8', 'replace'), final)
     except Exception:
-        pass
-    return res
+        return {'quality_version': Q.VERSION}
 
-def html_unescape(s): return s.replace('&amp;', '&')
-
-todo = sorted({c['url'] for c in cams if c['id'] not in preserved_ids and c['src'] == 'OpenStreetMap' and not c['img'] and not c['embed'] and c['url'] not in probe})
+todo = sorted({c['url'] for c in cams if c['id'] not in preserved_ids and c['src'] == 'OpenStreetMap' and not c['img'] and not c['embed'] and probe.get(c['url'], {}).get('quality_version') != Q.VERSION})
 print('probing', len(todo), 'operator pages...')
 with ThreadPoolExecutor(64) as ex:
     for u, r in zip(todo, ex.map(probe_url, todo)): probe[u] = r
 json.dump(probe, open(PROBE_PATH, 'w'))
-shops = {c['id'] for c in cams if c['id'] not in preserved_ids and c['src'] == 'OpenStreetMap' and (probe.get(c['url']) or {}).get('shop')
-         and not (c['img'] or c['embed'] or c['stream'] or c['video'])
-         and not any((probe.get(c['url']) or {}).get(k) for k in ('img', 'embed', 'stream'))}
-print('dropping', len(shops), 'non-camera (shop) OSM entries')
-cams = [c for c in cams if c['id'] not in shops]
+# Admission rules run on EVERY OSM record, including cached and carried-over records.
+# Keep an audit of exclusions without retaining unsafe URLs or credential-bearing query strings.
+approved, excluded, adjusted = [], [], 0
 for c in cams:
-    if c['id'] in preserved_ids: continue
-    p = probe.get(c['url'])
-    if p and not c['img'] and not c['embed']:
-        c['img'] = p.get('img'); c['embed'] = p.get('embed'); c['stream'] = c['stream'] or p.get('stream')
+    reviewed, reason = Q.review(c, probe.get(c['url']))
+    if reviewed is None:
+        excluded.append({'id': c['id'], 'name': c['name'], 'reason': reason})
+    else:
+        approved.append(reviewed)
+        adjusted += bool(reason)
+cams = approved
+os.makedirs('data', exist_ok=True)
+audit_path = 'data/excluded-cameras.json'
+previous = json.load(open(audit_path)) if os.path.exists(audit_path) else []
+audit = {c['id']: c for c in previous + excluded}
+for c in cams: audit.pop(c['id'], None)
+json.dump(list(audit.values()), open(audit_path, 'w'), ensure_ascii=False, indent=2)
+print('quality exclusions:', dict(collections.Counter(c['reason'] for c in excluded)), 'previews corrected:', adjusted)
 
 # ---- playback mode: 2 = moving video (stream / clip / player), 1 = live still image, 0 = link only
 for c in cams:

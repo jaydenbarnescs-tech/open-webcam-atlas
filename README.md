@@ -3,7 +3,7 @@
 Every open, public webcam we could find, on one monochrome globe — plus a tiny API that
 returns the closest cameras to any GPS point, or redirects you straight to the nearest feed.
 
-- **112,696 cameras from 39 open sources in 127 countries.** Live streams, operator clips and
+- **110,309 cameras from 39 open sources in 127 countries.** Live streams, operator clips and
   recorded timelapses play where available; snapshot-only cameras update at their operator’s pace.
 - **Globe:** MapLibre GL (globe projection) + OpenFreeMap vector tiles. Black country borders,
   black buildings once you zoom in, halftone camera clusters.
@@ -108,6 +108,23 @@ Kyoto tourism locations are named-landmark positions (OSM/official tourism maps)
 camera mounts; the camera detail explains this. The two official YouTube channels are refreshed
 by matching live stream titles, so changed broadcast IDs do not need a manual data edit.
 Note: NYC DOT blocks some cloud IP ranges (e.g. Oracle Cloud). Run the build from a home/office connection or CI if it fails.
+
+## Camera quality filtering
+
+OSM links are uncurated candidates, not proof that a camera exists. `scripts/quality.py`
+rejects known sellers/installers, reference pages and non-public URLs. It never promotes a
+whole website to an iframe just because embedding is allowed, or uses `og:image` as a
+webcam frame. Actual player endpoints, direct camera images and discovered streams are
+required. Product/branding images are discarded. Pages without sufficient media evidence
+are excluded from the active catalogue, even if a real camera may exist behind the link.
+
+These rules run on cached and carried-over records as well as new imports. Exclusion IDs,
+names and reasons are kept in `data/excluded-cameras.json` for review and later recovery.
+
+```bash
+python3 scripts/test-quality.py
+python3 scripts/build-data.py --clean-only
+```
 
 ## Adding a source
 

@@ -1,0 +1,716 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Webcam Atlas — every open camera on one globe</title>
+<meta name="description" content="An open index of ~12,000 public webcams on a monochrome globe, with a tiny API that returns the closest cameras to any GPS point.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='5' y='5' width='22' height='22' rx='3' fill='%230a0a0a'/><rect x='11' y='11' width='10' height='10' rx='1' fill='white'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css" rel="stylesheet">
+<style>
+:root{
+  --bg:#ffffff; --ink:#0a0a0a; --ink-2:#3d3d3d; --muted:#8e8e8e; --faint:#b9b9b9;
+  --line:#ebebeb; --line-2:#dedede; --sea:#f1f1ef; --red:#c8323a; --card:#ffffffee;
+  --sans:"Geist",ui-sans-serif,system-ui,-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;
+  --mono:"Geist Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --serif:"Instrument Serif","Times New Roman",serif;
+  --top:52px; --r:10px;
+  --shadow:0 1px 2px rgba(0,0,0,.04),0 4px 18px rgba(0,0,0,.04);
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 var(--sans);-webkit-font-smoothing:antialiased;overflow:hidden}
+:root{padding-top:env(safe-area-inset-top,0px)}
+button,input{font:inherit;color:inherit}
+button{cursor:pointer;background:none;border:0;padding:0}
+a{color:inherit}
+:focus-visible{outline:2px solid var(--ink);outline-offset:2px;border-radius:4px}
+.mono{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.serif{font-family:var(--serif);font-weight:400;letter-spacing:-.01em}
+
+/* ---------- map ---------- */
+#map{position:fixed;inset:var(--top) 0 0 0;background:var(--bg)}
+.maplibregl-ctrl-attrib{font:10px var(--mono)!important;background:#ffffffcc!important;color:var(--muted)}
+.maplibregl-ctrl-attrib a{color:var(--muted)!important}
+.maplibregl-ctrl-bottom-right{bottom:30px}
+.maplibregl-canvas{cursor:grab}
+
+/* ---------- top bar ---------- */
+header{position:fixed;top:0;left:0;right:0;height:calc(var(--top) + env(safe-area-inset-top,0px));padding-top:env(safe-area-inset-top,0px);
+  display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:16px;padding-inline:20px;
+  background:#fff;border-bottom:1px solid var(--line);z-index:20}
+.brand{display:flex;align-items:center;gap:10px;font-weight:600;font-size:14px;white-space:nowrap}
+.brand .mark{width:16px;height:16px;border-radius:3px;background:var(--ink);position:relative}
+.brand .mark::after{content:"";position:absolute;inset:4.5px;background:#fff;border-radius:1px}
+.brand .crumb{color:var(--muted);font-weight:400}
+.brand .sep{color:var(--line-2);font-weight:300}
+.search{position:relative;width:min(420px,42vw)}
+.search input{width:100%;height:32px;border:1px solid var(--line);border-radius:9px;background:#fafafa;padding:0 56px 0 32px;font-size:13px;outline:none;transition:border-color .15s,background .15s}
+.search input:focus{background:#fff;border-color:var(--line-2)}
+.search input::placeholder{color:var(--muted)}
+.search svg.ico{position:absolute;left:10px;top:9px;width:14px;height:14px;color:var(--muted)}
+.search kbd{position:absolute;right:8px;top:7px;font:10px var(--mono);color:var(--muted);border:1px solid var(--line);border-radius:5px;padding:1px 5px;background:#fff}
+.suggest{position:absolute;left:0;right:0;top:38px;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);overflow:hidden;display:none}
+.suggest.open{display:block}
+.suggest button{display:block;width:100%;text-align:left;padding:9px 12px;border-bottom:1px solid var(--line)}
+.suggest button:last-child{border-bottom:0}
+.suggest button[aria-selected=true],.suggest button:hover{background:#f6f6f6}
+.suggest .t{font-size:13px}
+.suggest .s{font:10.5px var(--mono);color:var(--muted);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nav{display:flex;justify-content:flex-end;align-items:center;gap:16px;font-size:13px}
+.nav a,.nav button{display:flex;align-items:center;gap:6px;text-decoration:none;color:var(--ink-2)}
+.nav a:hover,.nav button:hover{color:var(--ink)}
+.nav svg{width:15px;height:15px}
+
+/* ---------- floating cards ---------- */
+.card{background:var(--card);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)}
+#title{position:fixed;left:18px;top:calc(var(--top) + 16px + env(safe-area-inset-top,0px));padding:10px 13px 9px;z-index:5}
+#title h1{margin:2px 0 3px;font:400 24px/1 var(--serif);letter-spacing:-.02em}
+#title h1 i{font-style:italic}
+#title .mono{font-size:9.5px}
+#fig{position:fixed;left:30px;bottom:52px;padding:14px 22px 16px;z-index:5;max-width:min(460px,calc(100vw - 60px));transition:opacity .25s}
+#fig .mono{font-size:12px;letter-spacing:.2em}
+#fig h2{margin:6px 0 0;font:400 40px/1 var(--serif);letter-spacing:-.025em}
+#fig .cap{margin-top:8px;font:10.5px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--ink-2)}
+#fig .cap:empty{display:none}
+#hint{position:fixed;left:22px;bottom:14px;font-size:9.5px;z-index:4;color:var(--faint)}
+#legend{position:fixed;right:20px;bottom:14px;display:flex;gap:16px;font-size:9.5px;z-index:4;color:var(--faint)}
+#legend span{display:flex;align-items:center;gap:6px}
+#legend i{display:inline-block;width:9px;height:9px;background:#fff;box-shadow:inset 0 0 0 1.5px var(--ink),inset 0 0 0 3px #fff,inset 0 0 0 9px var(--ink)}
+#legend i.o{box-shadow:inset 0 0 0 1.5px var(--ink)}
+#legend i.r{background:var(--red);border-radius:50%}
+
+/* ---------- toolbar ---------- */
+#toolbar{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);display:flex;align-items:center;gap:4px;padding:4px;border-radius:12px;z-index:10}
+.tb{height:30px;display:flex;align-items:center;gap:7px;padding:0 11px;border-radius:8px;font-size:13px;color:var(--ink-2);white-space:nowrap}
+.tb:hover{background:#f3f3f3;color:var(--ink)}
+.tb.primary{background:var(--ink);color:#fff;padding:0 8px 0 12px}
+.tb.primary:hover{background:#262626}
+.tb kbd{font:10px var(--mono);border-radius:4px;padding:1px 5px;background:#ffffff26;color:#fff}
+.tb .n{font:11px var(--mono);color:var(--muted)}
+.tb svg{width:14px;height:14px}
+.tb.icon{width:30px;padding:0;justify-content:center}
+.tb-sep{width:1px;height:18px;background:var(--line);margin:0 4px}
+#zoomPct{font:11.5px var(--mono);color:var(--ink-2);min-width:58px;text-align:center}
+.tb[aria-pressed=true]{background:#f0f0f0;color:var(--ink)}
+
+/* ---------- filters popover ---------- */
+#filters{position:fixed;left:50%;bottom:72px;transform:translateX(-50%) translateY(6px);width:min(420px,calc(100vw - 24px));padding:16px 16px 14px;z-index:11;opacity:0;pointer-events:none;transition:opacity .15s,transform .15s}
+#filters.open{opacity:1;pointer-events:auto;transform:translateX(-50%) translateY(0)}
+.fgroup{margin-bottom:14px}
+.fgroup:last-child{margin-bottom:0}
+.fgroup>.mono{display:flex;justify-content:space-between;margin-bottom:7px;font-size:9.5px}
+.seg{display:grid;grid-template-columns:repeat(7,1fr);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{height:28px;font:11px var(--mono);color:var(--ink-2);border-right:1px solid var(--line)}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed=true]{background:var(--ink);color:#fff}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{height:28px;display:flex;align-items:center;gap:7px;padding:0 10px;border:1px solid var(--line);border-radius:999px;font-size:12.5px;color:var(--muted)}
+.chip .n{font:10px var(--mono);color:var(--faint)}
+.chip[aria-pressed=true]{color:var(--ink);border-color:var(--ink)}
+.chip[aria-pressed=true] .n{color:var(--muted)}
+.toggle{display:flex;align-items:center;justify-content:space-between;padding:6px 0;font-size:13px}
+.sw{width:32px;height:18px;border-radius:999px;background:#e4e4e4;position:relative;transition:background .15s;flex:none}
+.sw::after{content:"";position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.2);transition:transform .15s}
+.toggle[aria-pressed=true] .sw{background:var(--ink)}
+.toggle[aria-pressed=true] .sw::after{transform:translateX(14px)}
+
+/* ---------- results panel ---------- */
+#results{position:fixed;left:18px;top:calc(var(--top) + 96px + env(safe-area-inset-top,0px));bottom:186px;width:340px;display:none;flex-direction:column;z-index:6;overflow:hidden}
+#results.open{display:flex}
+.rhead{padding:12px 14px 10px;border-bottom:1px solid var(--line)}
+.rhead .top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.rhead h3{margin:3px 0 0;font:400 24px/1.05 var(--serif);letter-spacing:-.02em;word-break:break-word}
+.x{width:24px;height:24px;display:grid;place-items:center;border-radius:6px;color:var(--muted);flex:none}
+.x:hover{background:#f2f2f2;color:var(--ink)}
+.apiline{display:flex;align-items:center;gap:8px;margin-top:9px;padding:6px 8px;background:#f7f7f7;border-radius:6px;font:10.5px var(--mono);color:var(--ink-2);text-decoration:none;overflow:hidden}
+.apiline b{font-weight:500;color:var(--ink)}
+.apiline span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.apiline:hover{background:#efefef}
+.rlist{overflow:auto;flex:1;overscroll-behavior:contain}
+.ritem{display:grid;grid-template-columns:22px 64px 1fr;gap:10px;align-items:center;width:100%;text-align:left;padding:9px 14px;border-bottom:1px solid var(--line)}
+.ritem:hover,.ritem.active{background:#f7f7f7}
+.ritem .idx{font:10px var(--mono);color:var(--faint)}
+.thumb{width:64px;height:42px;border-radius:4px;background:#f1f1f1;overflow:hidden;position:relative}
+.thumb img{width:100%;height:100%;object-fit:cover;filter:grayscale(1) contrast(1.05);transition:filter .2s}
+.ritem:hover .thumb img{filter:none}
+.thumb.none{background-image:radial-gradient(#c9c9c9 0.8px,transparent 1px);background-size:5px 5px}
+.ritem .nm{font-size:13px;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.ritem .meta{font:10px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-top:3px}
+.empty{padding:22px 16px;font-size:13px;color:var(--ink-2)}
+.empty button{margin-top:10px;height:30px;padding:0 12px;border-radius:8px;background:var(--ink);color:#fff;font-size:12.5px}
+
+/* ---------- camera drawer ---------- */
+#drawer{position:fixed;top:calc(var(--top) + env(safe-area-inset-top,0px));right:0;bottom:0;width:min(440px,100vw);background:#fff;border-left:1px solid var(--line);z-index:15;transform:translateX(100%);transition:transform .28s cubic-bezier(.2,.7,.2,1);display:flex;flex-direction:column;padding-bottom:env(safe-area-inset-bottom,0px)}
+#drawer.open{transform:none}
+.dhead{display:flex;justify-content:space-between;align-items:center;padding:14px 18px 12px}
+.dbody{overflow:auto;padding:0 18px 24px;flex:1}
+.preview{aspect-ratio:16/10;border-radius:8px;background:#0d0d0d;overflow:hidden;position:relative;display:grid;place-items:center}
+.preview img{width:100%;height:100%;object-fit:contain}
+.preview .ph{position:absolute;inset:0;background-image:radial-gradient(#3a3a3a 1px,transparent 1.2px);background-size:7px 7px;display:grid;place-items:center;text-align:center;padding:24px}
+.preview .ph p{font:11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#bdbdbd;background:#0d0d0d;padding:6px 10px;border-radius:4px;margin:0}
+.live{position:absolute;left:10px;bottom:10px;font:9.5px var(--mono);letter-spacing:.14em;color:#fff;background:#00000080;padding:3px 7px;border-radius:4px;display:flex;align-items:center;gap:6px}
+.live i{width:6px;height:6px;border-radius:50%;background:var(--red);animation:pulse 2s infinite}
+@keyframes pulse{50%{opacity:.35}}
+.dfig{margin:14px 0 4px;font-size:10px}
+.dname{margin:0;font:400 34px/1.02 var(--serif);letter-spacing:-.02em;word-break:break-word}
+.dby{margin:8px 0 18px;font-size:13px;color:var(--ink-2)}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;height:38px;border-radius:9px;font-size:13.5px;text-decoration:none;width:100%}
+.btn.dark{background:var(--ink);color:#fff}
+.btn.dark:hover{background:#262626}
+.btn.line{border:1px solid var(--line);margin-top:8px;color:var(--ink-2)}
+.btn.line:hover{background:#f7f7f7}
+.facts{display:grid;grid-template-columns:1fr 1fr;gap:14px 16px;margin:20px 0 18px;padding-top:16px;border-top:1px solid var(--line)}
+.facts .mono{font-size:9px;margin-bottom:3px}
+.facts div div:last-child{font-size:13px;word-break:break-word}
+.code{background:#f7f7f7;border-radius:8px;padding:10px 12px;font:11px/1.6 var(--mono);color:var(--ink-2);word-break:break-all;margin-top:6px}
+.code b{color:var(--ink);font-weight:500}
+.lic{margin-top:16px;font-size:12px;color:var(--muted);line-height:1.5}
+
+/* ---------- API modal ---------- */
+#apiModal{position:fixed;inset:0;background:#ffffffb3;backdrop-filter:blur(3px);z-index:30;display:none;place-items:center;padding:16px}
+#apiModal.open{display:grid}
+#apiModal .card{width:min(640px,100%);max-height:calc(100vh - 32px);overflow:auto;padding:22px 24px;background:#fff}
+#apiModal h2{margin:4px 0 6px;font:400 38px/1 var(--serif);letter-spacing:-.02em}
+#apiModal p{color:var(--ink-2);margin:8px 0 14px;max-width:62ch}
+.ep{border-top:1px solid var(--line);padding:14px 0}
+.ep .row{display:flex;gap:10px;align-items:baseline;font:12.5px var(--mono)}
+.ep .verb{font-size:10px;letter-spacing:.12em;background:var(--ink);color:#fff;border-radius:4px;padding:2px 6px}
+.ep p{margin:6px 0 0;font-size:13px}
+.try{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+.try input{flex:1;min-width:90px;height:32px;border:1px solid var(--line);border-radius:8px;padding:0 10px;font:12px var(--mono)}
+.try button{height:32px;padding:0 14px;border-radius:8px;background:var(--ink);color:#fff;font-size:12.5px}
+pre.out{background:#0d0d0d;color:#e6e6e6;border-radius:8px;padding:12px;font:11px/1.55 var(--mono);max-height:260px;overflow:auto;margin:10px 0 0;white-space:pre-wrap;word-break:break-all;display:none}
+pre.out.show{display:block}
+
+/* ---------- loading ---------- */
+#loading{position:fixed;inset:var(--top) 0 0 0;display:grid;place-items:center;z-index:3;pointer-events:none;transition:opacity .4s}
+#loading.done{opacity:0}
+
+/* ---------- responsive ---------- */
+@media (max-width:820px){
+  :root{--top:52px}
+  header{grid-template-columns:auto 1fr auto;padding-inline:12px;gap:10px}
+  .brand .crumb,.brand .sep{display:none}
+  .search{width:100%}
+  .search kbd{display:none}
+  .nav .gh,.nav .lbl{display:none}
+  #title{display:none}
+  #hint,#legend{display:none}
+  #fig{left:12px;right:12px;bottom:76px;padding:10px 14px 12px;max-width:none}
+  #fig h2{font-size:28px}
+  #fig .mono{font-size:10px}
+  #toolbar{bottom:calc(14px + env(safe-area-inset-bottom,0px));max-width:calc(100vw - 16px)}
+  .tb .lbl{display:none}
+  #filters{bottom:calc(64px + env(safe-area-inset-bottom,0px))}
+  #results{left:0;right:0;top:auto;bottom:0;width:auto;height:52vh;border-radius:14px 14px 0 0;border-bottom:0;padding-bottom:env(safe-area-inset-bottom,0px)}
+  #results.open ~ #toolbar,#results.open ~ #fig{display:none}
+  body.drawer-open #fig,body.drawer-open #toolbar{display:none}
+  #drawer{top:auto;height:78vh;width:100vw;border-left:0;border-top:1px solid var(--line);border-radius:14px 14px 0 0;transform:translateY(100%)}
+  #drawer.open{transform:none}
+  .dname{font-size:28px}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand"><span class="mark" aria-hidden="true"></span><span>webcam atlas</span><span class="sep">/</span><span class="crumb">Explore</span></div>
+  <div class="search" role="combobox" aria-expanded="false" aria-haspopup="listbox">
+    <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <input id="q" type="search" placeholder="Search an address or place" autocomplete="off" aria-label="Search an address or place" aria-controls="suggest">
+    <kbd>⌘K</kbd>
+    <div class="suggest" id="suggest" role="listbox"></div>
+  </div>
+  <nav class="nav">
+    <button id="openApi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m8 7-5 5 5 5M16 7l5 5-5 5"/></svg><span>API</span></button>
+    <a class="gh" href="https://github.com/jaydenbarnescs-tech/open-webcam-atlas" target="_blank" rel="noopener" aria-label="Source on GitHub"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.68 0-1.25.45-2.28 1.19-3.08-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.8 1.19 1.83 1.19 3.08 0 4.41-2.69 5.38-5.26 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg></a>
+  </nav>
+</header>
+
+<div id="map" role="application" aria-label="Globe of public webcams"></div>
+<div id="loading"><span class="mono">Loading cameras</span></div>
+
+<div id="title" class="card">
+  <div class="mono">Webcam atlas · Earth</div>
+  <h1>Eyes on <i>earth.</i></h1>
+  <div class="mono" id="titleCount">— cameras · 3 open sources</div>
+</div>
+
+<section id="results" class="card" aria-label="Cameras near the searched place">
+  <div class="rhead">
+    <div class="top">
+      <div><div class="mono" id="rFig">Nearby</div><h3 id="rTitle">—</h3></div>
+      <button class="x" id="rClose" aria-label="Clear search"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+    </div>
+    <a class="apiline" id="rApi" target="_blank" rel="noopener"><b>GET</b><span id="rApiTxt"></span></a>
+  </div>
+  <div class="rlist" id="rList"></div>
+</section>
+
+<div id="filters" class="card" role="dialog" aria-label="Filters">
+  <div class="fgroup"><div class="mono"><span>Radius</span><span id="radiusLbl">2 km</span></div>
+    <div class="seg" id="radiusSeg"></div></div>
+  <div class="fgroup"><div class="mono"><span>Category</span></div><div class="chips" id="catChips"></div></div>
+  <div class="fgroup"><div class="mono"><span>Source</span></div><div class="chips" id="srcChips"></div></div>
+  <div class="fgroup">
+    <button class="toggle" id="imgOnly" aria-pressed="false" style="width:100%"><span>Only cameras with a live image</span><span class="sw"></span></button>
+    <button class="toggle" id="streets" aria-pressed="false" style="width:100%"><span>Show streets</span><span class="sw"></span></button>
+  </div>
+</div>
+
+<div id="fig" class="card">
+  <div class="mono" id="figNo">Fig. 01 · Earth</div>
+  <h2 id="figTitle">Every open camera. One globe.</h2>
+  <div class="cap" id="figCap"></div>
+</div>
+
+<div id="toolbar" class="card">
+  <button class="tb primary" id="nearMe"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="7"/></svg><span class="lbl">Near me</span><kbd>L</kbd></button>
+  <button class="tb" id="filtersBtn" aria-pressed="false" aria-controls="filters"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M7 12h10M10 18h4"/></svg><span class="lbl">Filters</span><span class="n" id="filterN">0</span></button>
+  <span class="tb-sep"></span>
+  <button class="tb icon" id="zOut" aria-label="Zoom out"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/></svg></button>
+  <span id="zoomPct">—</span>
+  <button class="tb icon" id="zIn" aria-label="Zoom in"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></button>
+  <button class="tb icon" id="home" aria-label="Back to the whole globe"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+</div>
+
+<div id="hint" class="mono">Scroll to pan · pinch to zoom · press a camera to open it</div>
+<div id="legend" class="mono"><span><i></i>Live image</span><span><i class="o"></i>Link only</span><span><i class="r"></i>Search point</span></div>
+
+<aside id="drawer" aria-label="Camera details" aria-hidden="true">
+  <div class="dhead"><div class="mono" id="dCrumb">Camera</div>
+    <button class="x" id="dClose" aria-label="Close camera"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+  <div class="dbody" id="dBody"></div>
+</aside>
+
+<div id="apiModal" role="dialog" aria-modal="true" aria-label="API">
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start">
+      <div><div class="mono">Fig. 04 · API</div><h2>One call. Ten cameras.</h2></div>
+      <button class="x" id="apiClose" aria-label="Close"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+    </div>
+    <p>Free, no key, CORS open. Send a GPS point, get the closest public cameras back, or get redirected straight to the nearest feed.</p>
+    <div class="ep"><div class="row"><span class="verb">GET</span><span>/api/nearest?lat=&amp;lon=</span></div>
+      <p>The 10 closest cameras, nearest first, with distance and direction. Optional: <code>limit</code> (1–200), <code>radius_km</code>, <code>category</code> (traffic, scenic, water, other), <code>source</code> (osm, nyc, caltrans), <code>has_image=1</code>.</p>
+      <div class="try"><input id="tLat" value="40.758" aria-label="Latitude"><input id="tLon" value="-73.9855" aria-label="Longitude"><button id="tRun">Run</button></div>
+      <pre class="out" id="tOut"></pre></div>
+    <div class="ep"><div class="row"><span class="verb">GET</span><span>/api/go?lat=&amp;lon=</span></div>
+      <p>Redirects (302) to the closest camera's feed. Add <code>&amp;image=1</code> to land on the still image when there is one. Accepts the same filters as <code>/nearest</code>.</p></div>
+    <div class="ep"><div class="row"><span class="verb">GET</span><span>/api/go/{id}</span></div>
+      <p>Redirects to one camera by id. Every result from <code>/nearest</code> includes its <code>go</code> link.</p></div>
+    <div class="ep"><div class="row"><span class="verb">GET</span><span>/api/cameras?id=</span></div>
+      <p>One camera's full record, including its feed and stream URLs. Without an id, returns dataset totals.</p></div>
+    <p class="lic">Camera index © OpenStreetMap contributors (ODbL), NYC DOT and Caltrans open data. Feeds belong to their operators. Please don't hammer them.</p>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
+<script>
+(() => {
+'use strict';
+const $ = (s) => document.querySelector(s);
+const CAT_LABEL = { traffic: 'Traffic', scenic: 'Scenic', water: 'Rivers & water', other: 'Other' };
+const SRC_KEY = { 'OpenStreetMap': 'osm', 'NYC DOT': 'nyc', 'Caltrans': 'caltrans' };
+const RADII = [0.5, 1, 2, 5, 10, 25, 50];
+const HOME = { center: [139.7, 30], zoom: window.innerWidth < 820 ? 1.0 : 2.0 };
+
+const state = { rows: [], cats: [], srcs: [], byId: new Map(), origin: null, radius: 2,
+  catOn: null, srcOn: null, imgOnly: false, streets: false, selected: null, results: [] };
+
+/* ---------- geo helpers (same maths as the API) ---------- */
+const rad = (d) => d * Math.PI / 180;
+function dist(a, b, c, d) { const x = Math.sin(rad(c - a) / 2) ** 2 + Math.cos(rad(a)) * Math.cos(rad(c)) * Math.sin(rad(d - b) / 2) ** 2; return 12742017.6 * Math.asin(Math.min(1, Math.sqrt(x))); }
+function bearing(a, b, c, d) { const y = Math.sin(rad(d - b)) * Math.cos(rad(c)); const x = Math.cos(rad(a)) * Math.sin(rad(c)) - Math.sin(rad(a)) * Math.cos(rad(c)) * Math.cos(rad(d - b)); return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360; }
+const compass = (b) => ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round(b / 45) % 8];
+const fmtDist = (m) => m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(m < 10000 ? 1 : 0)} km`;
+const fmtN = (n) => n.toLocaleString('en-US');
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+function circle(lon, lat, km, n = 96) { const pts = []; for (let i = 0; i <= n; i++) { const t = (i / n) * 2 * Math.PI; const dLat = (km / 110.574) * Math.sin(t); const dLon = (km / (111.32 * Math.cos(rad(lat)))) * Math.cos(t); pts.push([lon + dLon, lat + dLat]); } return { type: 'Feature', geometry: { type: 'Polygon', coordinates: [pts] }, properties: {} }; }
+
+/* ---------- canvas icons ---------- */
+function rng(seed) { return () => (seed = (seed * 16807) % 2147483647) / 2147483647; }
+// Crisp halftone discs: one image per size bucket so the dot pitch stays ~4.5 css px at every size.
+const HT_SIZES = [24, 32, 44, 58, 76, 100]; // css px diameter of the main disc
+function halftone(bucket, seed) {
+  const PR = 2, D = HT_SIZES[bucket], S = Math.round(D * 1.9) * PR, c = document.createElement('canvas'); c.width = c.height = S;
+  const g = c.getContext('2d'); const r = rng(seed * 7919 + bucket * 31 + 13);
+  const R0 = (D / 2) * PR, blobs = [[S / 2, S / 2, R0, 1]];
+  const n = 1 + Math.floor(r() * 3) + (bucket > 2 ? 1 : 0);
+  for (let i = 0; i < n; i++) { const a = r() * Math.PI * 2, d = R0 * (1.25 + r() * 0.25); blobs.push([S / 2 + Math.cos(a) * d, S / 2 + Math.sin(a) * d * 0.75, R0 * (0.22 + r() * 0.18), 0.5]); }
+  g.fillStyle = 'rgba(255,255,255,.94)';
+  for (const [x, y, R] of blobs) { g.beginPath(); g.arc(x, y, R + 3 * PR, 0, 7); g.fill(); }
+  const step = 4.6 * PR;
+  for (let y = step / 2; y < S; y += step) for (let x = step / 2; x < S; x += step) {
+    let v = 0; for (const [bx, by, R, k] of blobs) { const d = Math.hypot(x - bx, y - by) / R; if (d < 1) v = Math.max(v, (1 - d * d) * k); }
+    if (v <= 0.03) continue;
+    if (v < 0.22 && r() > v * 4.5) continue;
+    g.fillStyle = `rgba(10,10,10,${0.4 + v * 0.55})`;
+    g.beginPath(); g.arc(x, y, (0.45 + v * 1.15) * PR, 0, 7); g.fill();
+  }
+  return g.getImageData(0, 0, S, S);
+}
+function squareIcon(filled) {
+  // White tile with a black ring reads on white land AND on black buildings.
+  const S = 30, c = document.createElement('canvas'); c.width = c.height = S; const g = c.getContext('2d');
+  g.fillStyle = '#0a0a0a'; g.fillRect(5, 5, 20, 20);
+  g.fillStyle = '#ffffff'; g.fillRect(8, 8, 14, 14);
+  if (filled) { g.fillStyle = '#0a0a0a'; g.fillRect(11.5, 11.5, 7, 7); }
+  // soft white halo
+  g.globalCompositeOperation = 'destination-over'; g.fillStyle = 'rgba(255,255,255,.95)'; g.fillRect(3, 3, 24, 24);
+  return g.getImageData(0, 0, S, S);
+}
+function dotPattern() { const S = 12, c = document.createElement('canvas'); c.width = c.height = S; const g = c.getContext('2d'); g.fillStyle = '#ffffff'; g.fillRect(0, 0, S, S); g.fillStyle = '#a9a9a9'; g.beginPath(); g.arc(S / 2, S / 2, 1.5, 0, 7); g.fill(); return g.getImageData(0, 0, S, S); }
+
+/* ---------- map style: monochrome globe ---------- */
+const style = {
+  version: 8,
+  projection: { type: 'globe' },
+  sky: { 'atmosphere-blend': 0 },
+  glyphs: 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf',
+  sources: { omt: { type: 'vector', url: 'https://tiles.openfreemap.org/planet', attribution: '<a href="https://openfreemap.org" target="_blank">OpenFreeMap</a> © <a href="https://www.openmaptiles.org/" target="_blank">OpenMapTiles</a> Data © <a href="https://www.openstreetmap.org/copyright" target="_blank">OSM</a>' } },
+  layers: [
+    { id: 'land', type: 'background', paint: { 'background-color': '#ffffff' } },
+    { id: 'land-dots', type: 'background', paint: { 'background-pattern': 'dots', 'background-opacity': ['interpolate', ['linear'], ['zoom'], 3.5, 1, 6, 0] } },
+    { id: 'water', type: 'fill', source: 'omt', 'source-layer': 'water', filter: ['!=', ['get', 'brunnel'], 'tunnel'], paint: { 'fill-color': '#f1f1ef', 'fill-antialias': false } },
+    { id: 'streets', type: 'line', source: 'omt', 'source-layer': 'transportation', minzoom: 10, layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
+      filter: ['match', ['get', 'class'], ['motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'minor', 'service'], true, false],
+      paint: { 'line-color': '#d9d9d9', 'line-width': ['interpolate', ['exponential', 1.6], ['zoom'], 10, 0.4, 16, 3, 19, 9] } },
+    { id: 'buildings', type: 'fill', source: 'omt', 'source-layer': 'building', minzoom: 13, paint: { 'fill-color': '#0a0a0a', 'fill-opacity': ['interpolate', ['linear'], ['zoom'], 13, 0, 14.2, 0.92] } },
+    { id: 'borders', type: 'line', source: 'omt', 'source-layer': 'boundary', filter: ['all', ['==', ['get', 'admin_level'], 2], ['!=', ['get', 'maritime'], 1], ['!=', ['get', 'disputed'], 1]],
+      layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#0a0a0a', 'line-width': ['interpolate', ['linear'], ['zoom'], 0, 0.45, 5, 0.9, 10, 1.6] } },
+    { id: 'borders-disputed', type: 'line', source: 'omt', 'source-layer': 'boundary', filter: ['all', ['==', ['get', 'admin_level'], 2], ['==', ['get', 'disputed'], 1]],
+      paint: { 'line-color': '#0a0a0a', 'line-width': 0.8, 'line-dasharray': [2, 2] } },
+  ],
+};
+
+const map = new maplibregl.Map({ container: 'map', style, center: HOME.center, zoom: HOME.zoom, minZoom: 0.4, maxZoom: 19.5, attributionControl: { compact: true }, renderWorldCopies: false, dragRotate: false, pitchWithRotate: false });
+map.touchZoomRotate.disableRotation();
+const ICONS = { dots: dotPattern, 'cam-img': () => squareIcon(true), 'cam-link': () => squareIcon(false) };
+for (let b = 0; b < HT_SIZES.length; b++) for (let v = 0; v < 3; v++) ICONS[`ht-${b}-${v}`] = () => halftone(b, v + 1);
+function addIcons() { for (const [k, f] of Object.entries(ICONS)) if (!map.hasImage(k)) map.addImage(k, f(), { pixelRatio: 2 }); }
+map.on('styleimagemissing', (e) => { if (ICONS[e.id] && !map.hasImage(e.id)) map.addImage(e.id, ICONS[e.id](), { pixelRatio: 2 }); });
+map.on('style.load', addIcons);
+
+/* ---------- data ---------- */
+function filteredFeatures() {
+  const f = [];
+  for (const r of state.rows) {
+    if (!state.catOn.has(r[4]) || !state.srcOn.has(r[5]) || (state.imgOnly && !r[6])) continue;
+    f.push({ type: 'Feature', id: f.length, geometry: { type: 'Point', coordinates: [r[1], r[2]] }, properties: { id: r[0], img: r[6] ? 1 : 0 } });
+  }
+  return { type: 'FeatureCollection', features: f };
+}
+
+async function loadData() {
+  const res = await fetch('/data/cams.json'); const d = await res.json();
+  state.rows = d.rows; state.cats = d.cats; state.srcs = d.srcs;
+  for (const r of d.rows) state.byId.set(r[0], r);
+  state.catOn = new Set(d.cats.map((_, i) => i)); state.srcOn = new Set(d.srcs.map((_, i) => i));
+  $('#titleCount').textContent = `${fmtN(d.rows.length)} cameras · ${d.srcs.length} open sources`;
+  buildFilters();
+}
+
+function addLayers() {
+  map.addSource('cams', { type: 'geojson', data: filteredFeatures(), cluster: true, clusterRadius: 58, clusterMaxZoom: 11, promoteId: 'id' });
+  map.addSource('search', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  map.addSource('hits', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  map.addSource('sel', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+
+  map.addLayer({ id: 'radius-fill', type: 'fill', source: 'search', filter: ['==', ['geometry-type'], 'Polygon'], paint: { 'fill-color': '#0a0a0a', 'fill-opacity': 0.035 } });
+  map.addLayer({ id: 'radius-line', type: 'line', source: 'search', filter: ['==', ['geometry-type'], 'Polygon'], paint: { 'line-color': '#0a0a0a', 'line-width': 1, 'line-dasharray': [3, 3] } });
+
+  map.addLayer({ id: 'clusters', type: 'symbol', source: 'cams', filter: ['has', 'point_count'],
+    layout: { 'icon-image': ['concat', 'ht-', ['step', ['get', 'point_count'], '0', 10, '1', 40, '2', 150, '3', 500, '4', 1500, '5'], '-', ['to-string', ['%', ['get', 'cluster_id'], 3]]],
+      'icon-size': 1, 'icon-allow-overlap': true, 'icon-ignore-placement': true,
+      'text-field': ['get', 'point_count_abbreviated'], 'text-font': ['Noto Sans Regular'], 'text-size': 10, 'text-letter-spacing': 0.18,
+      'text-offset': ['step', ['get', 'point_count'], ['literal', [0, 1.9]], 10, ['literal', [0, 2.3]], 40, ['literal', [0, 2.9]], 150, ['literal', [0, 3.6]], 500, ['literal', [0, 4.5]], 1500, ['literal', [0, 5.7]]],
+      'text-allow-overlap': false },
+    paint: { 'text-color': '#555', 'text-halo-color': '#ffffff', 'text-halo-width': 3 } });
+
+  map.addLayer({ id: 'points', type: 'symbol', source: 'cams', filter: ['!', ['has', 'point_count']],
+    layout: { 'icon-image': ['case', ['==', ['get', 'img'], 1], 'cam-img', 'cam-link'], 'icon-size': ['interpolate', ['linear'], ['zoom'], 4, 0.62, 12, 0.8, 16, 1],
+      'icon-allow-overlap': true, 'icon-ignore-placement': true },
+    paint: { 'icon-opacity': 1 } });
+
+  map.addLayer({ id: 'hit-labels', type: 'symbol', source: 'hits',
+    layout: { 'text-field': ['get', 'n'], 'text-font': ['Noto Sans Regular'], 'text-size': 10, 'text-offset': [0, -1.3], 'text-letter-spacing': 0.1, 'text-allow-overlap': false },
+    paint: { 'text-color': '#0a0a0a', 'text-halo-color': '#fff', 'text-halo-width': 2.5 } });
+
+  map.addLayer({ id: 'sel-ring', type: 'circle', source: 'sel', paint: { 'circle-radius': 11, 'circle-color': 'rgba(0,0,0,0)', 'circle-stroke-color': '#c8323a', 'circle-stroke-width': 1.6 } });
+  map.addLayer({ id: 'origin', type: 'circle', source: 'search', filter: ['==', ['geometry-type'], 'Point'], paint: { 'circle-radius': 5, 'circle-color': '#c8323a', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2.5 } });
+}
+
+function refreshSource() { const s = map.getSource('cams'); if (s) s.setData(filteredFeatures()); }
+
+/* ---------- interactions ---------- */
+let spinning = true;
+function spin() { if (!spinning || map.isMoving()) return; const c = map.getCenter(); c.lng -= 2.2; map.easeTo({ center: c, duration: 1000, easing: (t) => t }); }
+map.on('moveend', () => { if (spinning) spin(); });
+const stopSpin = () => { spinning = false; };
+['mousedown', 'touchstart', 'wheel', 'dragstart'].forEach((e) => map.on(e, stopSpin));
+
+map.on('load', async () => {
+  try { await loadData(); } catch (e) { $('#loading').innerHTML = '<span class="mono">Could not load the camera index. Refresh to try again.</span>'; return; }
+  addLayers();
+  $('#loading').classList.add('done');
+  updateZoom();
+  if (!readHash()) setTimeout(spin, 600);
+
+  map.on('click', 'clusters', async (e) => {
+    stopSpin();
+    const f = e.features[0];
+    const z = await map.getSource('cams').getClusterExpansionZoom(f.properties.cluster_id);
+    map.easeTo({ center: f.geometry.coordinates, zoom: Math.min(z + 0.3, 16), duration: 700 });
+  });
+  map.on('click', 'points', (e) => { stopSpin(); openCamera(e.features[0].properties.id, { fly: false }); });
+  for (const l of ['clusters', 'points']) {
+    map.on('mouseenter', l, () => (map.getCanvas().style.cursor = 'pointer'));
+    map.on('mouseleave', l, () => (map.getCanvas().style.cursor = ''));
+  }
+  const tip = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 10, className: 'tip' });
+  map.on('mousemove', 'points', (e) => { const r = state.byId.get(e.features[0].properties.id); if (!r) return; tip.setLngLat(e.features[0].geometry.coordinates).setHTML(`<div style="font:12px var(--sans)">${esc(r[3])}</div><div class="mono" style="font-size:9px;margin-top:2px">${CAT_LABEL[state.cats[r[4]]]} · ${esc(state.srcs[r[5]])}</div>`).addTo(map); });
+  map.on('mouseleave', 'points', () => tip.remove());
+});
+map.on('zoom', updateZoom);
+function updateZoom() { const p = 100 * Math.pow(2, map.getZoom() - 16); $('#zoomPct').textContent = (p >= 10 ? p.toFixed(0) : p >= 1 ? p.toFixed(1) : p >= 0.01 ? p.toFixed(2) : p.toFixed(3)) + '%'; }
+
+$('#zIn').onclick = () => { stopSpin(); map.zoomIn(); };
+$('#zOut').onclick = () => { stopSpin(); map.zoomOut(); };
+$('#home').onclick = () => { stopSpin(); clearSearch(); closeCamera(); map.flyTo({ ...HOME, duration: 1400 }); };
+
+/* ---------- fig card ---------- */
+function setFig(no, title, cap = '') { $('#figNo').textContent = no; $('#figTitle').textContent = title; $('#figCap').textContent = cap; }
+function defaultFig() { setFig('Fig. 01 · Earth', `${fmtN(state.rows.length || 11944)} cameras. One globe.`); }
+
+/* ---------- filters (絞り込み) ---------- */
+function buildFilters() {
+  const seg = $('#radiusSeg');
+  seg.innerHTML = RADII.map((r) => `<button data-r="${r}" aria-pressed="${r === state.radius}">${r < 1 ? r : r}</button>`).join('');
+  seg.onclick = (e) => { const b = e.target.closest('button'); if (!b) return; state.radius = +b.dataset.r; syncFilters(); if (state.origin) runSearch(false, true); };
+  const count = (i, k) => state.rows.reduce((n, r) => n + (r[k] === i), 0);
+  $('#catChips').innerHTML = state.cats.map((c, i) => `<button class="chip" data-i="${i}" aria-pressed="true">${CAT_LABEL[c]}<span class="n">${fmtN(count(i, 4))}</span></button>`).join('');
+  $('#srcChips').innerHTML = state.srcs.map((s, i) => `<button class="chip" data-i="${i}" aria-pressed="true">${esc(s)}<span class="n">${fmtN(count(i, 5))}</span></button>`).join('');
+  const chipToggle = (set, el) => (e) => { const b = e.target.closest('.chip'); if (!b) return; const i = +b.dataset.i; if (set.has(i) && set.size === 1) { set.clear(); state[el === '#catChips' ? 'cats' : 'srcs'].forEach((_, j) => set.add(j)); } else if (set.has(i)) set.delete(i); else set.add(i); applyFilters(); };
+  $('#catChips').onclick = chipToggle(state.catOn, '#catChips');
+  $('#srcChips').onclick = chipToggle(state.srcOn, '#srcChips');
+  syncFilters();
+}
+function syncFilters() {
+  document.querySelectorAll('#radiusSeg button').forEach((b) => b.setAttribute('aria-pressed', +b.dataset.r === state.radius));
+  $('#radiusLbl').textContent = `${state.radius} km`;
+  document.querySelectorAll('#catChips .chip').forEach((b) => b.setAttribute('aria-pressed', state.catOn.has(+b.dataset.i)));
+  document.querySelectorAll('#srcChips .chip').forEach((b) => b.setAttribute('aria-pressed', state.srcOn.has(+b.dataset.i)));
+  $('#imgOnly').setAttribute('aria-pressed', state.imgOnly);
+  $('#streets').setAttribute('aria-pressed', state.streets);
+  const n = (state.cats.length - state.catOn.size) + (state.srcs.length - state.srcOn.size) + (state.imgOnly ? 1 : 0) + (state.radius !== 2 ? 1 : 0);
+  $('#filterN').textContent = n;
+}
+function applyFilters() { syncFilters(); refreshSource(); if (state.origin) runSearch(false, true); }
+$('#imgOnly').onclick = () => { state.imgOnly = !state.imgOnly; applyFilters(); };
+$('#streets').onclick = () => { state.streets = !state.streets; map.setLayoutProperty('streets', 'visibility', state.streets ? 'visible' : 'none'); syncFilters(); };
+function toggleFilters(force) { const open = force ?? !$('#filters').classList.contains('open'); $('#filters').classList.toggle('open', open); $('#filtersBtn').setAttribute('aria-pressed', open); }
+$('#filtersBtn').onclick = () => toggleFilters();
+document.addEventListener('pointerdown', (e) => { if (!e.target.closest('#filters,#filtersBtn')) toggleFilters(false); if (!e.target.closest('.search')) closeSuggest(); });
+
+/* ---------- geocoding (Photon / OSM) ---------- */
+const q = $('#q'), sug = $('#suggest');
+let sugItems = [], sugIdx = -1, sugTimer, sugCtl;
+function closeSuggest() { sug.classList.remove('open'); q.parentElement.setAttribute('aria-expanded', 'false'); }
+function renderSuggest() {
+  if (!sugItems.length) { closeSuggest(); return; }
+  sug.innerHTML = sugItems.map((s, i) => `<button role="option" aria-selected="${i === sugIdx}" data-i="${i}"><div class="t">${esc(s.title)}</div><div class="s">${esc(s.sub)}</div></button>`).join('');
+  sug.classList.add('open'); q.parentElement.setAttribute('aria-expanded', 'true');
+}
+function parseCoords(s) { const m = s.trim().match(/^(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)$/); if (!m) return null; const a = +m[1], b = +m[2]; return Math.abs(a) <= 90 && Math.abs(b) <= 180 ? { lat: a, lon: b } : null; }
+q.addEventListener('input', () => {
+  clearTimeout(sugTimer); const v = q.value.trim(); sugIdx = -1;
+  if (v.length < 2) { sugItems = []; renderSuggest(); return; }
+  const c = parseCoords(v);
+  if (c) { sugItems = [{ title: `${c.lat}, ${c.lon}`, sub: 'GPS coordinates', lat: c.lat, lon: c.lon }]; renderSuggest(); return; }
+  sugTimer = setTimeout(async () => {
+    try {
+      sugCtl?.abort(); sugCtl = new AbortController();
+      const ctr = map.getCenter(); const bias = map.getZoom() > 5 ? `&lat=${ctr.lat.toFixed(3)}&lon=${ctr.lng.toFixed(3)}` : '';
+      const r = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(v)}&limit=6${bias}`, { signal: sugCtl.signal });
+      const j = await r.json();
+      sugItems = j.features.map((f) => { const p = f.properties; const title = p.name || [p.street, p.housenumber].filter(Boolean).join(' ') || p.city || 'Unnamed place';
+        const sub = [p.street && p.name ? [p.street, p.housenumber].filter(Boolean).join(' ') : '', p.district, p.city, p.state, p.country].filter((x, i, a) => x && a.indexOf(x) === i && x !== title).join(', ');
+        return { title, sub, lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1] }; });
+      renderSuggest();
+    } catch (e) { if (e.name !== 'AbortError') { sugItems = []; renderSuggest(); } }
+  }, 220);
+});
+q.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown' && sugItems.length) { sugIdx = (sugIdx + 1) % sugItems.length; renderSuggest(); e.preventDefault(); }
+  else if (e.key === 'ArrowUp' && sugItems.length) { sugIdx = (sugIdx - 1 + sugItems.length) % sugItems.length; renderSuggest(); e.preventDefault(); }
+  else if (e.key === 'Enter') { const s = sugItems[sugIdx >= 0 ? sugIdx : 0]; if (s) pick(s); }
+  else if (e.key === 'Escape') { closeSuggest(); q.blur(); }
+});
+sug.addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) pick(sugItems[+b.dataset.i]); });
+function pick(s) { closeSuggest(); q.value = s.title; q.blur(); setOrigin(s.lat, s.lon, s.title); }
+
+/* ---------- nearby search ---------- */
+function setOrigin(lat, lon, label) {
+  stopSpin(); closeCamera();
+  state.origin = { lat, lon, label };
+  runSearch(true);
+}
+function computeNearby(limit = 100) {
+  const o = state.origin, R = state.radius * 1000, out = [];
+  for (const r of state.rows) {
+    if (!state.catOn.has(r[4]) || !state.srcOn.has(r[5]) || (state.imgOnly && !r[6])) continue;
+    if (Math.abs(r[2] - o.lat) > state.radius / 110.574 + 0.01) continue;
+    const d = dist(o.lat, o.lon, r[2], r[1]); if (d <= R) out.push([d, r]);
+  }
+  out.sort((a, b) => a[0] - b[0]);
+  return out.slice(0, limit);
+}
+function nearestAny() { const o = state.origin; let best = null; for (const r of state.rows) { if (!state.catOn.has(r[4]) || !state.srcOn.has(r[5]) || (state.imgOnly && !r[6])) continue; const d = dist(o.lat, o.lon, r[2], r[1]); if (!best || d < best[0]) best = [d, r]; } return best; }
+function apiUrl() {
+  const o = state.origin, p = new URLSearchParams({ lat: o.lat.toFixed(5), lon: o.lon.toFixed(5), radius_km: state.radius, limit: 100 });
+  if (state.catOn.size < state.cats.length) p.set('category', [...state.catOn].map((i) => state.cats[i]).join(','));
+  if (state.srcOn.size < state.srcs.length) p.set('source', [...state.srcOn].map((i) => SRC_KEY[state.srcs[i]]).join(','));
+  if (state.imgOnly) p.set('has_image', '1');
+  return `/api/nearest?${p}`;
+}
+function runSearch(fly, keepView) {
+  const o = state.origin; if (!o) return;
+  const hits = computeNearby(); state.results = hits;
+  map.getSource('search').setData({ type: 'FeatureCollection', features: [circle(o.lon, o.lat, state.radius), { type: 'Feature', geometry: { type: 'Point', coordinates: [o.lon, o.lat] }, properties: {} }] });
+  map.getSource('hits').setData({ type: 'FeatureCollection', features: hits.slice(0, 40).map(([, r], i) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [r[1], r[2]] }, properties: { n: String(i + 1).padStart(2, '0') } })) });
+  const ids = hits.map(([, r]) => r[0]);
+  map.setPaintProperty('points', 'icon-opacity', ['case', ['in', ['get', 'id'], ['literal', ids]], 1, 0.22]);
+  // UI
+  $('#results').classList.add('open');
+  $('#rFig').textContent = `Fig. 02 · Within ${state.radius} km`;
+  $('#rTitle').textContent = o.label;
+  const u = apiUrl(); $('#rApi').href = u; $('#rApiTxt').textContent = u;
+  const list = $('#rList');
+  if (!hits.length) {
+    const nb = nearestAny();
+    list.innerHTML = `<div class="empty">No cameras within ${state.radius} km.${nb ? ` The nearest is ${fmtDist(nb[0])} away.` : ''}<br>${nb ? `<button id="expand">Show cameras within ${pickRadius(nb[0])} km</button>` : ''}</div>`;
+    $('#expand')?.addEventListener('click', () => { state.radius = pickRadius(nb[0]); syncFilters(); runSearch(true); });
+  } else {
+    list.innerHTML = hits.map(([d, r], i) => { const b = compass(bearing(o.lat, o.lon, r[2], r[1]));
+      return `<button class="ritem" data-id="${esc(r[0])}"><span class="idx">${String(i + 1).padStart(2, '0')}</span><span class="thumb${r[6] ? '' : ' none'}">${r[6] ? `<img loading="lazy" alt="" src="${esc(r[6])}" onerror="this.parentNode.classList.add('none');this.remove()">` : ''}</span><span><div class="nm">${esc(r[3])}</div><div class="meta">${fmtDist(d)} ${b} · ${CAT_LABEL[state.cats[r[4]]]}</div></span></button>`; }).join('');
+  }
+  setFig('Fig. 02 · Nearby', hits.length ? `${hits.length}${hits.length === 100 ? '+' : ''} camera${hits.length === 1 ? '' : 's'} within ${state.radius} km.` : `Nothing within ${state.radius} km.`, o.label);
+  if (fly) {
+    const zoom = Math.max(4, Math.min(16.5, 14.3 - Math.log2(state.radius)));
+    map.flyTo({ center: [o.lon, o.lat], zoom, duration: 1600, padding: window.innerWidth >= 820 ? { left: 340 } : { bottom: window.innerHeight * 0.45 } });
+  }
+  writeHash();
+}
+function pickRadius(m) { const km = m / 1000; return RADII.find((r) => r >= km * 1.05) || 50; }
+function clearSearch() {
+  state.origin = null; state.results = []; $('#results').classList.remove('open'); q.value = '';
+  if (map.getSource('search')) { map.getSource('search').setData({ type: 'FeatureCollection', features: [] }); map.getSource('hits').setData({ type: 'FeatureCollection', features: [] }); map.setPaintProperty('points', 'icon-opacity', 1); }
+  defaultFig(); writeHash();
+}
+$('#rClose').onclick = clearSearch;
+$('#rList').addEventListener('click', (e) => { const b = e.target.closest('.ritem'); if (b) openCamera(b.dataset.id, { fly: true }); });
+$('#rList').addEventListener('mouseover', (e) => { const b = e.target.closest('.ritem'); if (b) { const r = state.byId.get(b.dataset.id); if (r) map.getSource('sel').setData({ type: 'Feature', geometry: { type: 'Point', coordinates: [r[1], r[2]] }, properties: {} }); } });
+$('#rList').addEventListener('mouseleave', () => { if (!state.selected) map.getSource('sel').setData({ type: 'FeatureCollection', features: [] }); else markSel(state.selected); });
+
+$('#nearMe').onclick = locate;
+function locate() {
+  if (!navigator.geolocation) { setFig('Fig. 02 · Nearby', 'Location is not available in this browser.'); return; }
+  setFig('Fig. 02 · Nearby', 'Finding you…');
+  navigator.geolocation.getCurrentPosition((p) => setOrigin(p.coords.latitude, p.coords.longitude, 'Your location'),
+    () => setFig('Fig. 02 · Nearby', 'Allow location access, or search an address instead.'), { enableHighAccuracy: true, timeout: 10000 });
+}
+
+/* ---------- camera drawer ---------- */
+let refreshTimer;
+function markSel(id) { const r = state.byId.get(id); map.getSource('sel')?.setData(r ? { type: 'Feature', geometry: { type: 'Point', coordinates: [r[1], r[2]] }, properties: {} } : { type: 'FeatureCollection', features: [] }); }
+function bust(u) { return u + (u.includes('?') ? '&' : '?') + '_t=' + Math.floor(Date.now() / 10000); }
+async function openCamera(id, { fly }) {
+  const r = state.byId.get(id); if (!r) return;
+  state.selected = id; markSel(id);
+  document.querySelectorAll('.ritem').forEach((el) => el.classList.toggle('active', el.dataset.id === id));
+  const cat = state.cats[r[4]], src = state.srcs[r[5]], o = state.origin;
+  const d = o ? dist(o.lat, o.lon, r[2], r[1]) : null;
+  $('#dCrumb').textContent = `Camera · ${src}`;
+  const img = r[6];
+  $('#dBody').innerHTML = `
+    <div class="preview">${img ? `<img id="dImg" alt="Latest image from ${esc(r[3])}" src="${esc(img)}"><span class="live"><i></i>LIVE STILL</span>` : ''}
+      <div class="ph" id="dPh" style="${img ? 'display:none' : ''}"><p>${img ? 'Image unavailable right now' : 'This camera opens on its operator’s page'}</p></div></div>
+    <div class="mono dfig">Fig. 03 · ${esc(CAT_LABEL[cat])}${d != null ? ` · ${fmtDist(d)} away` : ''}</div>
+    <h2 class="dname">${esc(r[3])}</h2>
+    <div class="dby">by ${esc(src)}<span id="dHost" style="color:var(--muted)"></span></div>
+    <a class="btn dark" href="/api/go/${encodeURIComponent(id)}" target="_blank" rel="noopener">Open live feed</a>
+    <button class="btn line" id="dCopy">Copy redirect link</button>
+    <div class="facts">
+      <div><div class="mono">Category</div><div>${esc(CAT_LABEL[cat])}</div></div>
+      <div><div class="mono">Source</div><div>${esc(src)}</div></div>
+      <div><div class="mono">Coordinates</div><div style="font-family:var(--mono);font-size:12px">${r[2].toFixed(5)}, ${r[1].toFixed(5)}</div></div>
+      <div><div class="mono">${d != null ? 'Distance' : 'Camera id'}</div><div style="font-family:var(--mono);font-size:12px">${d != null ? `${fmtDist(d)} ${compass(bearing(o.lat, o.lon, r[2], r[1]))}` : esc(id)}</div></div>
+    </div>
+    <div class="mono" style="font-size:9px">Same camera, from the API</div>
+    <div class="code"><b>GET</b> /api/go/${esc(id)}<br><b>GET</b> /api/nearest?lat=${r[2]}&amp;lon=${r[1]}&amp;limit=10</div>
+    <p class="lic">${src === 'OpenStreetMap' ? 'Location from OpenStreetMap contributors (ODbL).' : `Published as open data by ${esc(src)}.`} The feed belongs to its operator; the atlas only links to it.</p>`;
+  $('#drawer').classList.add('open'); $('#drawer').setAttribute('aria-hidden', 'false'); document.body.classList.add('drawer-open');
+  const im = $('#dImg');
+  if (im) {
+    im.onerror = () => { im.remove(); $('#dPh').style.display = ''; document.querySelector('.live')?.remove(); };
+    clearInterval(refreshTimer);
+    if (src !== 'OpenStreetMap' || /current|latest|live|image/i.test(img)) refreshTimer = setInterval(() => { const n = new Image(); n.onload = () => { if (state.selected === id && $('#dImg')) $('#dImg').src = n.src; }; n.src = bust(img); }, 15000);
+  }
+  $('#dCopy').onclick = async () => { const u = `${location.origin}/api/go/${encodeURIComponent(id)}`; try { await navigator.clipboard.writeText(u); $('#dCopy').textContent = 'Copied'; } catch { prompt('Redirect link', u); } setTimeout(() => $('#dCopy') && ($('#dCopy').textContent = 'Copy redirect link'), 1600); };
+  setFig('Fig. 03 · Camera', 'Open any of them.', `${r[3].slice(0, 48)} · ${src}`);
+  fetch(`/api/cameras?id=${encodeURIComponent(id)}`).then((x) => x.ok ? x.json() : null).then((j) => { if (j && state.selected === id && j.feed_url) { try { $('#dHost').textContent = ' · ' + new URL(j.feed_url).hostname.replace(/^www\./, ''); } catch {} } }).catch(() => {});
+  if (fly) map.flyTo({ center: [r[1], r[2]], zoom: Math.max(map.getZoom(), 15.5), duration: 900, padding: window.innerWidth >= 820 ? { right: 440, left: state.origin ? 340 : 0 } : { bottom: window.innerHeight * 0.6 } });
+  writeHash();
+}
+function closeCamera() {
+  clearInterval(refreshTimer); state.selected = null; markSel(null);
+  $('#drawer').classList.remove('open'); $('#drawer').setAttribute('aria-hidden', 'true'); document.body.classList.remove('drawer-open');
+  document.querySelectorAll('.ritem.active').forEach((el) => el.classList.remove('active'));
+  if (state.origin) runSearch(false, true); else defaultFig();
+  writeHash();
+}
+$('#dClose').onclick = closeCamera;
+
+/* ---------- API modal ---------- */
+$('#openApi').onclick = () => $('#apiModal').classList.add('open');
+$('#apiClose').onclick = () => $('#apiModal').classList.remove('open');
+$('#apiModal').addEventListener('click', (e) => { if (e.target.id === 'apiModal') $('#apiModal').classList.remove('open'); });
+$('#tRun').onclick = async () => {
+  const out = $('#tOut'); out.classList.add('show'); out.textContent = 'Running…';
+  try { const r = await fetch(`/api/nearest?lat=${encodeURIComponent($('#tLat').value)}&lon=${encodeURIComponent($('#tLon').value)}&limit=10`); const j = await r.json();
+    if (j.cameras) j.cameras = j.cameras.map(({ id, name, distance_m, direction, category, go }) => ({ id, name, distance_m, direction, category, go }));
+    out.textContent = JSON.stringify(j, null, 2); } catch (e) { out.textContent = 'Request failed: ' + e.message; }
+};
+
+/* ---------- keyboard + url ---------- */
+document.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); q.focus(); q.select(); return; }
+  if (e.target.matches('input')) return;
+  if (e.key === 'Escape') { if ($('#apiModal').classList.contains('open')) $('#apiModal').classList.remove('open'); else if (state.selected) closeCamera(); else if ($('#filters').classList.contains('open')) toggleFilters(false); else if (state.origin) clearSearch(); }
+  else if (e.key.toLowerCase() === 'l') locate();
+  else if (e.key.toLowerCase() === 'f') toggleFilters();
+});
+function writeHash() {
+  const p = new URLSearchParams();
+  if (state.origin) { p.set('at', `${state.origin.lat.toFixed(5)},${state.origin.lon.toFixed(5)}`); p.set('r', state.radius); if (state.origin.label && state.origin.label !== 'Your location') p.set('q', state.origin.label); }
+  if (state.selected) p.set('cam', state.selected);
+  const s = p.toString(); history.replaceState(null, '', s ? `#${s}` : location.pathname);
+}
+function readHash() {
+  const p = new URLSearchParams(location.hash.slice(1)); let used = false;
+  if (p.get('r') && RADII.includes(+p.get('r'))) { state.radius = +p.get('r'); syncFilters(); }
+  const at = p.get('at') && parseCoords(p.get('at'));
+  if (at) { spinning = false; setOrigin(at.lat, at.lon, p.get('q') || `${at.lat}, ${at.lon}`); q.value = p.get('q') || ''; used = true; }
+  if (p.get('cam') && state.byId.has(p.get('cam'))) { spinning = false; openCamera(p.get('cam'), { fly: true }); used = true; }
+  return used;
+}
+if (window.innerWidth < 820) q.placeholder = 'Search an address';
+defaultFig();
+})();
+</script>
+</body>
+</html>

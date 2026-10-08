@@ -13,7 +13,11 @@ returns the closest cameras to any GPS point, or redirects you straight to the n
 
 ## Hosting
 
-Production is moving to ChatGPT Sites. The Vercel project is retained only as a paused fallback.
+Production moved to https://open-webcam-atlas.mgcinc-taiga.chatgpt.site on 2026-10-08.
+The active Sites checkout is `/Users/jayden.csai/Developer/open-webcam-atlas-sites`.
+That checkout compresses the large catalogue sources to fit Sites source storage.
+This GitHub checkout is retained as the original source and migration reference.
+The Vercel project is paused and disconnected from GitHub; its old URL returns DEPLOYMENT_PAUSED.
 Do not deploy or resume it without an explicit request: the move avoids further Vercel usage.
 
 `npm run build` packages the existing UI and all five APIs for Sites. The camera catalogue

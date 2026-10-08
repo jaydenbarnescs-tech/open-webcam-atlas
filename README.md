@@ -9,7 +9,20 @@ returns the closest cameras to any GPS point, or redirects you straight to the n
   black buildings once you zoom in, halftone camera clusters.
 - **Dashboard:** search an address, see cameras in the vicinity, narrow by radius, category,
   source and "has a live image".
-- **No keys, no database.** Static site + five Vercel functions.
+- **No keys, no database.** Static globe + five APIs hosted on ChatGPT Sites.
+
+## Hosting
+
+Production is moving to ChatGPT Sites. The Vercel project is retained only as a paused fallback.
+Do not deploy or resume it without an explicit request: the move avoids further Vercel usage.
+
+`npm run build` packages the existing UI and all five APIs for Sites. The camera catalogue
+is partitioned into 64 assets; nearest-camera requests load a small search index and only
+the matching records, keeping Worker memory bounded. No Vercel API or image proxy is used.
+Use the Sites plugin's publish workflow with the project ID in `.openai/hosting.json`.
+
+Validation: `node --test scripts/sites.test.mjs scripts/snapshot.test.mjs scripts/frames.test.mjs`
+after building. The Sites adapter is checked against the original nearest-camera API.
 
 ## Sources
 

@@ -6,7 +6,8 @@
   "description": "An open index of public webcams on a monochrome globe, plus a tiny nearest-camera API.",
   "scripts": {
     "data": "python3 scripts/build-data.py",
-    "dev": "node scripts/dev.mjs"
+    "dev": "node scripts/dev.mjs",
+    "build": "node scripts/build-sites.mjs"
   },
   "engines": {
     "node": ">=20"

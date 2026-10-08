@@ -3,3 +3,5 @@ node_modules/
 .vercel/
 .DS_Store
 __pycache__/
+dist/
+.sites-runtime/
